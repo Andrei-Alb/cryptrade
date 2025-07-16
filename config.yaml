@@ -1,0 +1,65 @@
+# Configurações para Trading Crypto
+# Arquivo: config.yaml
+
+exchange:
+  api_key: "${BYBIT_API_KEY}"
+  api_secret: "${BYBIT_API_SECRET}"
+  testnet: false  # true para testes, false para produção
+  base_url: "https://api.bybit.com"
+  websocket_url: "wss://stream.bybit.com/v5/public/linear"
+  
+trading:
+  pares: ["BTCUSDT", "ETHUSDT"]
+  quantidade_padrao: 0.001  # BTC
+  quantidade_eth: 0.01      # ETH
+  stop_loss_padrao: 2.0     # 2%
+  take_profit_padrao: 3.0   # 3%
+  max_ordens_dia: 100
+  max_ordens_simultaneas: 5
+  
+# Configurações de Simulação e Treinamento
+simulacao:
+  ativo: true               # true = modo simulação, false = modo real
+  capital_inicial: 90.0   # Capital simulado em USDT
+  salvar_resultados: true   # Salvar resultados para análise
+  max_operacoes: 50         # Máximo de operações por sessão de treinamento
+  
+treinamento:
+  ativo: true               # Sistema de aprendizado ativo
+  salvar_decisoes: true     # Salvar todas as decisões da IA
+  salvar_resultados: true   # Salvar resultados das operações
+  analisar_performance: true # Analisar performance periodicamente
+  ajustar_parametros: true  # Ajustar parâmetros automaticamente
+  
+coleta:
+  frequencia: 5              # segundos
+  websocket: true
+  reconexao_automatica: true
+  timeout: 30
+  retry_attempts: 3
+  
+ia:
+  usar_ollama: false
+  modelo_llama_gguf: ./models/llama-2-7b-chat.Q4_K_M.gguf
+  batch_interval: 5
+  
+risco:
+  max_drawdown_diario: 5.0   # 5%
+  max_exposicao: 50.0        # 50% do capital
+  stop_emergencia: 10.0      # 10% perda
+  max_perda_por_ordem: 2.0   # 2% por ordem
+  risco_maximo_permitido: 3.0
+  
+monitoramento:
+  alertas_email: false
+  alertas_telegram: false
+  log_detalhado: true
+  salvar_dados: true
+  
+banco_dados:
+  tipo: "sqlite"
+  arquivo: "dados/crypto_trading.db"
+  backup_automatico: true
+  max_dias_historico: 30 
+# Adicione o parâmetro batch_interval para controle do intervalo de batching da IA
+batch_interval: 60 

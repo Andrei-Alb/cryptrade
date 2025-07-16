@@ -1,0 +1,9 @@
+selenium
+pandas
+loguru
+pyyaml
+schedule
+requests
+pyarrow # opcional, para Parquet
+numpy 
+streamlit 
