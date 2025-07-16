@@ -1,248 +1,259 @@
-# 🤖 Robô de Trading Pessoal - Mini-Índice B3
+# 🤖 CryptoTrade - Sistema de Trading com IA Autônoma
 
-Sistema automatizado para coleta de dados do mini-índice (WIN) e IBOV da B3, com análise de IA e execução de ordens.
+[![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Status](https://img.shields.io/badge/Status-Produção-brightgreen.svg)]()
 
-## 📋 Pré-requisitos
+> **Sistema avançado de trading automatizado com IA local e aprendizado contínuo**
 
-- Python 3.8+
-- Linux (testado em Ubuntu)
-- Conexão com internet
+## 📋 Visão Geral
 
-## 🚀 Instalação
+O **CryptoTrade** é um sistema completo de trading automatizado que utiliza inteligência artificial local para tomar decisões de compra e venda em criptomoedas. O sistema possui aprendizado autônomo, monitoramento em tempo real e execução de ordens automatizada.
 
+### 🎯 Características Principais
+
+- 🤖 **IA Local Autônoma** - Usa modelos Llama/Phi3 para decisões
+- 📊 **Aprendizado Contínuo** - Sistema que aprende com resultados
+- ⚡ **Tempo Real** - Análise e execução em tempo real
+- 🔒 **Seguro** - Execução local, sem dependência de APIs externas
+- 📈 **Monitoramento** - Dashboard completo de performance
+- 🎮 **Modo Simulação** - Teste sem risco real
+
+## 🚀 Funcionalidades
+
+### 🤖 Sistema de IA
+- **Modelos Locais**: Llama 3.1 8B, Phi3 Mini, Qwen2.5
+- **Aprendizado Autônomo**: Sistema que ajusta confiança baseado em resultados
+- **Análise Técnica**: RSI, MACD, Bollinger Bands, Tendências
+- **Cache Inteligente**: Otimização de performance
+
+### 📊 Trading
+- **Múltiplos Pares**: BTC/USDT, ETH/USDT, etc.
+- **Gestão de Risco**: Stop Loss, Take Profit automático
+- **Ordens Dinâmicas**: Ajuste automático baseado em mercado
+- **Simulação**: Modo teste sem risco
+
+### 📈 Monitoramento
+- **Dashboard Real-time**: Performance e estatísticas
+- **Logs Detalhados**: Histórico completo de operações
+- **Alertas**: Notificações de eventos importantes
+- **Relatórios**: Análise de performance
+
+## 🛠️ Instalação
+
+### Pré-requisitos
 ```bash
-# 1. Clone o repositório
-cd robo_trading
+# Python 3.10+
+python --version
 
-# 2. Crie e ative o ambiente virtual
-python3 -m venv venv
-source venv/bin/activate
+# Ollama (para modelos de IA)
+curl -fsSL https://ollama.ai/install.sh | sh
 
-# 3. Instale as dependências
+# Git
+git --version
+```
+
+### Instalação do Projeto
+```bash
+# Clone o repositório
+git clone https://github.com/Andrei-Alb/cryptrade.git
+cd cryptrade
+
+# Crie ambiente virtual
+python -m venv venv
+source venv/bin/activate  # Linux/Mac
+# ou
+venv\Scripts\activate     # Windows
+
+# Instale dependências
 pip install -r requirements.txt
+
+# Configure credenciais
+cp credenciais_exemplo.py credenciais.py
+# Edite credenciais.py com suas chaves da corretora
 ```
 
-## 📁 Estrutura do Projeto
-
-```
-robo_trading/
-├── main.py                    # Script principal (coleta única)
-├── main_continuo.py           # Coleta contínua (horário de mercado)
-├── teste_continuo.py          # Coleta contínua (modo teste)
-├── testador_frequencia.py     # Testa frequências da API B3
-├── monitor.py                 # Monitoramento do sistema
-├── coletor.py                 # Coleta dados da API B3
-├── armazenamento.py           # Banco SQLite
-├── analisador.py              # Análise com IA
-├── executor.py                # Execução de ordens
-├── config.py                  # Configurações
-├── dados/                     # Banco SQLite
-├── logs/                      # Logs do sistema
-└── venv/                      # Ambiente virtual
-```
-
-## 🎯 Como Usar
-
-**⚠️ IMPORTANTE:** Todos os comandos devem ser executados dentro da pasta `robo_trading/` com o ambiente virtual ativado.
-
+### Configuração dos Modelos de IA
 ```bash
-# 1. Navegar para o diretório do projeto
-cd robo_trading
-
-# 2. Ativar ambiente virtual
-source venv/bin/activate
-
-# 3. Agora executar os comandos
+# Instale modelos otimizados
+ollama pull phi3:mini      # Modelo rápido (recomendado)
+ollama pull llama2:7b-chat # Modelo alternativo
 ```
 
-### 1. Coleta Única de Dados
-**Comando:** `python3 main.py`
-**O que faz:** Coleta dados uma vez e para
-**Saída esperada:**
-```
-2025-07-13 22:45:30.123 | INFO     | coletor:coletar_dados_b3:22 - Coletando dados da B3 para IBOV
-2025-07-13 22:45:30.456 | INFO     | coletor:coletar_dados:104 - Dados coletados da B3: 136187.31
-2025-07-13 22:45:30.789 | INFO     | coletor:coletar_dados:112 - Dados coletados da B3 para WINZ25: 143550
-2025-07-13 22:45:30.790 | INFO     | analisador:analisar_com_ia:15 - Análise IA: AGUARDAR (confiança: 0.7)
+## ⚙️ Configuração
+
+### 1. Credenciais da Corretora
+```python
+# credenciais.py
+BYBIT_API_KEY = "sua_api_key"
+BYBIT_API_SECRET = "sua_api_secret"
 ```
 
-### 2. Coleta Contínua (Horário de Mercado)
-**Comando:** `python3 main_continuo.py`
-**O que faz:** Coleta dados continuamente apenas em dias úteis (09:00-17:00)
-**Saída fora do horário:**
-```
-2025-07-13 22:30:30.649 | INFO     | __main__:executar:165 - 🚀 Iniciando Coleta Contínua de Dados
-2025-07-13 22:30:30.649 | INFO     | __main__:executar:167 - 🕐 Horário de mercado: 09:00:00 - 17:00:00
-2025-07-13 22:30:30.650 | INFO     | __main__:executar:177 - ⏸️  Fora do horário de mercado. Aguardando...
-```
+### 2. Configuração do Sistema
+```yaml
+# config.yaml
+trading:
+  pares: ["BTCUSDT", "ETHUSDT"]
+  quantidade_padrao: 0.001
+  stop_loss_padrao: 2.0
+  take_profit_padrao: 3.0
 
-### 3. Coleta Contínua (Modo Teste)
-**Comando:** `python3 teste_continuo.py`
-**O que faz:** Coleta dados continuamente sem restrição de horário (5 ciclos)
-**Saída esperada:**
-```
-2025-07-13 22:38:17.772 | INFO     | __main__:executar:160 - 🧪 Iniciando Coleta Contínua de Dados (MODO TESTE)
-2025-07-13 22:38:17.772 | INFO     | __main__:executar:161 - ⏰ Frequência: 30 segundos
-2025-07-13 22:38:17.772 | INFO     | __main__:executar:162 - 🔄 Ciclos máximos: 5
-2025-07-13 22:38:39.921 | INFO     | coletor:coletar_dados:104 - Dados coletados da B3: 136187.31
-2025-07-13 22:38:40.492 | INFO     | coletor:coletar_dados:112 - Dados coletados da B3 para WINZ25: 143550
-2025-07-13 22:38:40.493 | INFO     | __main__:coletar_dados_ciclo:103 - ✅ Dados coletados - 2 símbolos - Latência: 0.953s
-2025-07-13 22:38:40.493 | INFO     | __main__:executar:181 - ⏳ Aguardando 30s para próxima coleta... (1/5)
+ia:
+  modelo_principal: "phi3:mini"
+  timeout_inferencia: 15
 ```
 
-### 4. Teste de Frequência da API
-**Comando:** `python3 testador_frequencia.py`
-**O que faz:** Testa diferentes frequências de coleta (1s, 5s, 10s, 15s, 30s, 60s)
-**Saída esperada:**
-```
-2025-07-13 22:50:00.123 | INFO     | __main__:testar_frequencia:45 - 🧪 Testando frequência: 30 segundos
-2025-07-13 22:50:00.456 | INFO     | coletor:coletar_dados:104 - Dados coletados da B3: 136187.31
-2025-07-13 22:50:00.789 | INFO     | coletor:coletar_dados:112 - Dados coletados da B3 para WINZ25: 143550
-2025-07-13 22:50:30.123 | INFO     | __main__:testar_frequencia:45 - 🧪 Testando frequência: 30 segundos
-...
-2025-07-13 22:52:00.456 | INFO     | __main__:exibir_resultados:120 - 📊 RESULTADOS DO TESTE
-2025-07-13 22:52:00.456 | INFO     | __main__:exibir_resultados:121 - Frequência: 30s | Sucessos: 4/4 | Latência média: 0.35s
-```
+## 🚀 Uso
 
-### 5. Monitoramento do Sistema
-**Comando:** `python3 monitor.py`
-**O que faz:** Mostra status do sistema, dados recentes e estatísticas
-**Saída esperada:**
-```
-2025-07-13 22:55:00.123 | INFO     | __main__:exibir_status:45 - 📊 STATUS DO SISTEMA
-2025-07-13 22:55:00.123 | INFO     | __main__:exibir_status:46 - ============================================================
-2025-07-13 22:55:00.124 | INFO     | __main__:exibir_status:47 - 🕐 Última coleta: 2025-07-13 22:38:40
-2025-07-13 22:55:00.124 | INFO     | __main__:exibir_status:48 - 📈 IBOV: 136187.31
-2025-07-13 22:55:00.124 | INFO     | __main__:exibir_status:49 - 📈 WINZ25: 143550
-2025-07-13 22:55:00.124 | INFO     | __main__:exibir_status:50 - 💾 Total de registros: 156
-2025-07-13 22:55:00.124 | INFO     | __main__:exibir_status:51 - ⏰ Horário de mercado: NÃO
-```
-
-## 📊 Dados Coletados
-
-### Símbolos Disponíveis
-- **IBOV**: Índice Bovespa
-- **WINZ25**: Mini-índice (dezembro/2025)
-- **WINM25**: Mini-índice (março/2025) - quando disponível
-- **WINN25**: Mini-índice (novembro/2025) - quando disponível
-
-### Estrutura dos Dados
-```json
-{
-  "simbolo": "IBOV",
-  "preco_atual": 136187.31,
-  "preco_abertura": 136500.0,
-  "preco_minimo": 135000.0,
-  "preco_maximo": 137000.0,
-  "preco_medio": 136000.0,
-  "variacao": -0.5,
-  "volume": 0,
-  "timestamp": "2025-07-13T22:38:39.921",
-  "fonte": "B3_API"
-}
-```
-
-## 🗄️ Banco de Dados
-
-**Localização:** `dados/trading.db`
-**Tabelas:**
-- `precos`: Dados de preços coletados
-- `analises`: Resultados das análises de IA
-- `ordens`: Ordens executadas
-
-**Consultar dados:**
+### Execução Rápida
 ```bash
-sqlite3 dados/trading.db "SELECT * FROM precos ORDER BY timestamp DESC LIMIT 10;"
+# Modo simulação (recomendado para testes)
+./executar_robo.sh
+
+# Modo produção (cuidado!)
+./executar_tudo.sh
 ```
 
-## 📝 Logs
+### Execução Manual
+```python
+# Inicializar sistema
+python main.py
 
-**Localização:** `logs/`
-**Arquivos:**
-- `robo_trading.log`: Log principal
-- `coleta_continua.log`: Log da coleta contínua
-- `coleta_continua_teste.log`: Log do modo teste
-- `teste_frequencia.log`: Log dos testes de frequência
+# Apenas treinamento
+python robo_treinamento.py
 
-**Ver logs em tempo real:**
+# Tempo real
+python robo_tempo_real.py
+```
+
+### Scripts Úteis
 ```bash
-tail -f logs/coleta_continua.log
+# Parar robô
+./parar_robo.sh
+
+# Alternar modo (simulação/produção)
+python alternar_modo.py
+
+# Testar conectividade
+python teste_conectividade.py
 ```
 
-## ⚙️ Configurações
+## 📊 Monitoramento
 
-**Arquivo:** `config.py`
-**Principais configurações:**
-- Frequência de coleta: 30 segundos
-- Horário de mercado: 09:00-17:00
-- Dias úteis: Segunda a Sexta
-- Timeout da API: 10 segundos
-
-## 🚨 Tratamento de Erros
-
-O sistema inclui:
-- **Backoff exponencial** em caso de falhas
-- **Fallback** para dados simulados se API indisponível
-- **Rate limiting** automático (evita sobrecarregar API)
-- **Logs detalhados** de todos os erros
-
-## 🔧 Comandos Úteis
-
+### Dashboard Web
 ```bash
-# Ativar ambiente virtual
-source venv/bin/activate
-
-# Ver dados recentes no banco
-sqlite3 dados/trading.db "SELECT simbolo, preco_atual, timestamp FROM precos ORDER BY timestamp DESC LIMIT 5;"
-
-# Ver logs em tempo real
-tail -f logs/coleta_continua.log
-
-# Parar coleta contínua
-Ctrl+C
-
-# Verificar status do sistema
-python3 monitor.py
+# Acesse o dashboard
+http://localhost:8080
 ```
 
-## 📈 Status do Projeto
-
-✅ **Implementado:**
-- Coleta de dados reais da API B3
-- Armazenamento em SQLite
-- Coleta contínua com controle de horário
-- Modo de teste sem restrições
-- Teste de frequências da API
-- Monitoramento do sistema
-- Logs detalhados
-- Tratamento de erros robusto
-
-🔄 **Em desenvolvimento:**
-- Análise com IA (mock implementado)
-- Execução de ordens (mock implementado)
-
-## 🆘 Solução de Problemas
-
-**Erro: "No module named 'loguru'"**
+### Logs
 ```bash
-source venv/bin/activate
-pip install loguru
+# Visualizar logs em tempo real
+tail -f logs/robo_ia_tempo_real.log
+
+# Análise de performance
+python analisador.py
 ```
 
-**Erro: "table precos has no column named simbolo"**
-```bash
-rm dados/trading.db
-python3 main.py  # Recria o banco
+## 🔧 Arquitetura
+
+```
+cryptrade/
+├── ia/                          # Sistema de IA
+│   ├── decisor.py              # Tomada de decisões
+│   ├── llama_cpp_client.py     # Cliente IA local
+│   ├── sistema_aprendizado_autonomo.py  # Aprendizado
+│   └── preparador_dados.py     # Preparação de dados
+├── executor.py                  # Execução de ordens
+├── coletor.py                   # Coleta de dados
+├── monitor.py                   # Monitoramento
+├── config.yaml                  # Configurações
+└── PRDS/                        # Documentação técnica
 ```
 
-**Sistema não coleta dados**
-- Verificar se está no horário de mercado (09:00-17:00, dias úteis)
-- Usar `teste_continuo.py` para testar fora do horário
+## 📈 Performance
+
+### Métricas Atuais
+- ⚡ **Tempo de Inferência**: 15-60s (otimização em andamento)
+- 🎯 **Acertividade**: 60-70% (varia com mercado)
+- 📊 **Throughput**: 1-4 decisões/minuto
+- 💾 **Uso de Memória**: 4-5GB (modelo atual)
+
+### Otimizações Planejadas
+- ⚡ **75-92% mais rápido** (PRD de otimização)
+- 📈 **300% mais decisões** por minuto
+- 💾 **60-80% menos memória**
+
+## 📚 Documentação
+
+### PRDs (Product Requirements Documents)
+- [📋 PRD Otimização de Velocidade](PRDS/02_PRD_Otimizacao_IA_Velocidade.md)
+- [📊 Resumo Executivo](PRDS/02_PRD_Otimizacao_IA_Velocidade_RESUMO.md)
+- [📈 Histórico de PRDs](PRDS/historico/)
+
+### Guias
+- [🚀 Como Executar](README_EXECUCAO.md)
+- [🧠 Acompanhar IA Aprendendo](COMO_ACOMPANHAR_IA_APRENDENDO.md)
+- [📊 Relatório de Melhorias](RELATORIO_MELHORIAS.md)
+
+## 🔒 Segurança
+
+### Boas Práticas
+- ✅ **Nunca** commite credenciais reais
+- ✅ Use sempre modo simulação primeiro
+- ✅ Monitore logs regularmente
+- ✅ Configure limites de risco adequados
+
+### Configurações de Segurança
+```yaml
+risco:
+  max_drawdown_diario: 5.0
+  max_exposicao: 50.0
+  stop_emergencia: 10.0
+```
+
+## 🤝 Contribuição
+
+### Como Contribuir
+1. Fork o projeto
+2. Crie uma branch para sua feature
+3. Commit suas mudanças
+4. Push para a branch
+5. Abra um Pull Request
+
+### Padrões de Código
+- Use Python 3.10+
+- Siga PEP 8
+- Documente funções importantes
+- Adicione testes para novas funcionalidades
+
+## 📄 Licença
+
+Este projeto está licenciado sob a Licença MIT - veja o arquivo [LICENSE](LICENSE) para detalhes.
+
+## ⚠️ Disclaimer
+
+**ATENÇÃO**: Trading automatizado envolve riscos significativos. Este software é fornecido "como está" sem garantias. Use por sua conta e risco.
+
+### Recomendações
+- 🧪 **Sempre teste em simulação primeiro**
+- 💰 **Comece com valores pequenos**
+- 📊 **Monitore constantemente**
+- 🎓 **Entenda os riscos antes de usar**
 
 ## 📞 Suporte
 
-Para dúvidas ou problemas:
-1. Verificar logs em `logs/`
-2. Consultar dados no banco SQLite
-3. Usar `monitor.py` para diagnóstico
-4. Verificar configurações em `config.py` 
+### Issues
+- [GitHub Issues](https://github.com/Andrei-Alb/cryptrade/issues)
+- [Discussions](https://github.com/Andrei-Alb/cryptrade/discussions)
+
+### Comunidade
+- 📧 Email: [seu-email@exemplo.com]
+- 💬 Discord: [link-do-discord]
+- 📱 Telegram: [@seu-usuario]
+
+---
+
+**⭐ Se este projeto te ajudou, considere dar uma estrela!**
+
+**🔄 Atualizações regulares com melhorias de performance e novas funcionalidades.** 
