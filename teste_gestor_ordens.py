@@ -16,6 +16,7 @@ logger.add("logs/teste_gestor_ordens.log", rotation="1 day")
 
 from executor import ExecutorOrdensSimuladas
 from ia.gestor_ordens import GestorOrdensIA
+from ia.sistema_aprendizado import SistemaAprendizado
 
 def testar_gestor_ordens():
     """Testa o sistema de gestão de ordens"""
@@ -24,7 +25,8 @@ def testar_gestor_ordens():
     
     # Inicializar componentes
     executor = ExecutorOrdensSimuladas()
-    gestor = GestorOrdensIA()
+    sistema = SistemaAprendizado()
+    gestor = GestorOrdensIA(parametros_ia=sistema.parametros_atuais)
     
     # Simular dados de mercado
     dados_mercado = {
@@ -168,7 +170,8 @@ def testar_aprendizado_continuo():
     logger.info("🧠 Testando aprendizado contínuo...")
     
     executor = ExecutorOrdensSimuladas()
-    gestor = GestorOrdensIA()
+    sistema = SistemaAprendizado()
+    gestor = GestorOrdensIA(parametros_ia=sistema.parametros_atuais)
     
     # Simular múltiplas ordens para testar aprendizado
     for i in range(5):

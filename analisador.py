@@ -29,7 +29,8 @@ class AnalisadorIA:
             model_name=self.config.get('ia', {}).get('modelo', 'llama3.1:8b')
         )
         self.preparador = PreparadorDadosIA()
-        self.decisor = DecisorIA(self.config.get('ia', {}))
+        # Passar string de configuração em vez de dict
+        self.decisor = DecisorIA("config.yaml")
         
         logger.info("Analisador de IA inicializado")
     
@@ -57,7 +58,12 @@ class AnalisadorIA:
             # 3. Processar decisão e aplicar filtros
             decisao_final = self.decisor.processar_decisao_ia(decisao_ia, dados_preparados)
             
-            # 4. Adicionar metadados
+            # 4. Verificar se decisao_final não é None antes de acessar
+            if decisao_final is None:
+                logger.error("Decisão final é None, retornando decisão de erro")
+                return self._decisao_erro(dados)
+            
+            # 5. Adicionar metadados
             decisao_final['timestamp'] = dados_preparados.get('timestamp')
             decisao_final['ativo'] = dados.get('simbolo') or dados_preparados.get('ativo', 'WINZ25')
             decisao_final['preco_analise'] = dados.get('preco_atual') or dados_preparados.get('preco_atual', 0.0)
@@ -100,7 +106,7 @@ class AnalisadorIA:
         """
         Retorna estatísticas do sistema
         """
-        return self.decisor.obter_estatisticas()
+        return self.decisor.obter_metricas()
 
 # Função de compatibilidade com código existente
 def analisar_com_ia(dados: Dict[str, Any], ordem_aberta: bool = False) -> Dict[str, Any]:

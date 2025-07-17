@@ -11,6 +11,7 @@ import os
 import sqlite3
 from pathlib import Path
 from typing import Callable
+from datetime import datetime
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
@@ -68,16 +69,16 @@ def teste_gestor_ordens():
         gestor._criar_tabelas_gestao()
     return True
 
-@registrar_teste('PreparadorDadosCrypto')
+@registrar_teste('PreparadorDadosIA')
 def teste_preparador():
-    from ia.preparador_dados import PreparadorDadosCrypto
-    preparador = PreparadorDadosCrypto()
+    from ia.preparador_dados import PreparadorDadosIA
+    preparador = PreparadorDadosIA()
     return True
 
 @registrar_teste('DecisorIA')
 def teste_decisor():
-    from ia.decisor import DecisorIA
-    decisor = DecisorIA()
+    from ia.decisor import Decisor
+    decisor = Decisor()
     return True
 
 @registrar_teste('CursorAITradingClient')
@@ -91,8 +92,8 @@ def teste_cursor_ai_client():
 def teste_sistema_aprendizado():
     from ia.sistema_aprendizado_autonomo import SistemaAprendizadoAutonomo
     sistema = SistemaAprendizadoAutonomo()
-    if hasattr(sistema, '_criar_tabelas_aprendizado'):
-        sistema._criar_tabelas_aprendizado()
+    if hasattr(sistema, '_criar_tabelas'):
+        sistema._criar_tabelas()
     return True
 
 @registrar_teste('SistemaAprendizado')
@@ -106,10 +107,46 @@ def teste_monitor():
     import monitor
     return True
 
+@registrar_teste('Sistema de Previsão IA')
+def teste_sistema_previsao():
+    from ia.decisor import Decisor
+    from ia.sistema_aprendizado import SistemaAprendizado
+    
+    # Simular decisão com previsões
+    decisao_simulada = {
+        "decisao": "comprar",
+        "confianca": 0.8,
+        "previsao_alvo": 52000,
+        "stop_loss": 4900,
+        "cenario_permanencia": "Manter se preço acima de 49500, Sair se atingir 52000 ou cair para 49000",
+        "razao": "RSIfavorável com tendência alta"
+    }
+    
+    dados_teste = {
+        "symbol": "BTCUSDT",
+        "preco_atual": 5000,
+        "rsi": 65,
+        "tendencia": "alta",
+        "volatilidade": 0.025,
+        "volume_24h": 100000
+    }
+    
+    decisor = Decisor()
+    sistema_aprendizado = SistemaAprendizado()
+    
+    # Testar extração de previsões
+    decisao_processada = decisor.processar_decisao_ia(decisao_simulada, dados_teste)
+    if not decisao_processada or 'previsoes' not in decisao_processada:
+        raise Exception("Falha ao extrair previsões da IA")    
+    previsoes = decisao_processada['previsoes']
+    if not previsoes.get('target') or not previsoes.get('stop_loss'):
+        raise Exception("Previsões incompletas: target ou stop_loss não encontrados")  
+    return True
+
 # Teste de tabelas e colunas críticas
 @registrar_teste('Tabelas e Colunas Críticas')
 def teste_tabelas_colunas():
-    db_path = 'dados/crypto_trading.db'
+    db_path = 'dados/trading.db'
     tabelas_colunas = {
         'ordens_simuladas': [
             'order_id', 'symbol', 'side', 'order_type', 'qty', 'price', 'status',
@@ -144,42 +181,77 @@ def teste_tabelas_colunas():
 def teste_ordem_ia():
     print("\n===== TESTE FINAL: ORDEM DE TESTE PELA IA =====\n")
     from executor_simulado import ExecutorSimulado
-    from ia.decisor import DecisorIA
-    from ia.preparador_dados import PreparadorDadosCrypto
+    from ia.decisor import Decisor
+    from ia.preparador_dados import PreparadorDadosIA
     from ia.cursor_ai_client import CursorAITradingClient
     from ia.sistema_aprendizado_autonomo import SistemaAprendizadoAutonomo
     from yaml import safe_load  # type: ignore
     import random
+    
     with open('config.yaml', 'r') as f:
         config = safe_load(f)
+    
     executor = ExecutorSimulado(config)
-    preparador = PreparadorDadosCrypto()
-    decisor = DecisorIA()
+    preparador = PreparadorDadosIA()
+    decisor = Decisor()
     ia_client = CursorAITradingClient()
     sistema = SistemaAprendizadoAutonomo()
+    
     # Simular dados
-    dados_mercado = {'preco': random.uniform(100, 200), 'volume': random.uniform(1, 10)}
-    dados_ia = preparador.preparar_dados_analise_crypto(dados_mercado, 1)
+    dados_mercado = {'symbol': 'BTCUSDT', 'preco_atual': random.uniform(50000, 51000), 'rsi': random.uniform(30, 70), 'tendencia': random.choice(['alta', 'baixa', 'lateral']), 'volatilidade': random.uniform(0.1, 0.05), 'volume_24h': random.uniform(100000, 1000000)}
+    
+    dados_ia = preparador.preparar_dados_analise(dados_mercado, 1)
     print("[IA] Preparando dados para decisão...")
-    decisao_ia = ia_client.analisar_dados_mercado(dados_ia['dados_mercado'])
+    
+    decisao_ia = ia_client.analisar_dados_mercado(dados_ia)
     print(f"[IA] Decisão IA: {decisao_ia}")
-    resposta = decisor.processar_decisao_ia(decisao_ia, dados_ia['dados_mercado'])
+    
+    resposta = decisor.processar_decisao_ia(decisao_ia, dados_ia)
     print(f"[IA] Decisão processada: {resposta}")
-    if resposta.get('decisao') in ['comprar', 'vender']:
+    
+    if resposta and resposta.get('decisao') in ['comprar', 'vender']:
         print(f"[ORD] Enviando ordem de teste: {resposta['decisao'].upper()}...")
-        resultado = executor.enviar_ordem_market('BTCUSDT', 'Buy' if resposta['decisao']=='comprar' else 'Sell', qty=0.01)
+        resultado = executor.enviar_ordem_market('BTCUSDT', 'Buy' if resposta['decisao']=='comprar' else 'Sell', qty=0.1)
         assert resultado is not None
         print(f"[ORD] Ordem enviada com sucesso: {resultado}")
+        
         order_id = resultado['orderId']
         preco_saida = resultado['avgPrice']  # ou outro preço de saída desejado
         razao_saida = "fechamento_teste"
-        dados_mercado_saida = {}  # ou dados_ia['dados_mercado'] se quiser
+        dados_mercado_saida = dados_ia
+        
         executor.gestor_ordens.fechar_ordem_dinamica(order_id, preco_saida, razao_saida, dados_mercado_saida)
         print("[ORD] Ordem de teste fechada.")
     else:
         print("[ORD] Decisão da IA foi 'aguardar'. Nenhuma ordem enviada.")
-    sistema.registrar_decisao_autonoma('BTCUSDT', resposta, dados_ia['dados_mercado'])
-    print("[IA] Decisão registrada no sistema de aprendizado.")
+    
+    if resposta:
+        # Usar método correto do sistema de aprendizado
+        if hasattr(sistema, 'registrar_resultado'):
+            from ia.sistema_aprendizado_autonomo import ResultadoTrade
+            resultado_trade = ResultadoTrade(
+                timestamp=datetime.now().isoformat(),
+                symbol='BTCUSDT',
+                direcao='compra' if resposta.get('decisao') == 'comprar' else 'venda',
+                preco_entrada=50000,
+                preco_saida=51000,
+                quantidade=0.01,
+                pnl=10.0,
+                pnl_percentual=2.0,
+                duracao=120,
+                rsi_entrada=65,
+                volatilidade_entrada=0.025,
+                tendencia_entrada='alta',
+                confianca_entrada=0.8,
+                stop_loss=49000,
+                take_profit=52000,
+                motivo_saida='teste',
+                indicadores_entrada={'rsi': 65, 'tendencia': 'alta'},
+                sucesso=True
+            )
+            sistema.registrar_resultado(resultado_trade)
+        print("[IA] Decisão registrada no sistema de aprendizado.")
+    
     print("\n===== FIM DO TESTE FINAL =====\n")
     return True
 

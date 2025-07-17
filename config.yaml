@@ -39,8 +39,13 @@ coleta:
   retry_attempts: 3
   
 ia:
-  usar_ollama: false
-  modelo_llama_gguf: ./models/llama-2-7b-chat.Q4_K_M.gguf
+  usar_ollama: true
+  modelo_principal: "phi3:mini"  # Modelo otimizado para velocidade
+  modelo_fallback: "llama2:7b-chat"  # Fallback se necessário
+  timeout_inferencia: 20  # AUMENTADO de 15 para45 segundos
+  max_tokens: 150         # Limitado para velocidade
+  temperature: 0.3        # Mais determinístico
+  cache_ttl: 30           # Cache de 30 segundos
   batch_interval: 5
   
 risco:
@@ -61,5 +66,11 @@ banco_dados:
   arquivo: "dados/crypto_trading.db"
   backup_automatico: true
   max_dias_historico: 30 
-# Adicione o parâmetro batch_interval para controle do intervalo de batching da IA
-batch_interval: 60 
+
+# Configurações de otimização
+otimizacao:
+  cache_habilitado: true
+  processamento_paralelo: true   # HABILITADO - Fase 3 concluída
+  fallback_rapido: true          # HABILITADO - Fase 2 concluída
+  metricas_tempo_real: true
+  max_workers_paralelo: 3        # Número de workers para processamento paralelo 

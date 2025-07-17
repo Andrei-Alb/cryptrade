@@ -20,11 +20,9 @@ class CursorAITradingClient:
         """
         self.model_name = model_name
         self.ollama_url = "http://localhost:11434"
-        self.max_retries = 3
-        self.timeout = 60  # Aumentar de 30 para 60 segundos
-        self.fallback_mode = True  # Ativar modo de análise técnica simples por padrão
-        
-        # Verificar se Ollama está rodando
+        self.timeout = 20
+        self.max_retries = 3        
+        # Verificar disponibilidade do Ollama
         self._verificar_ollama()
     
     def _verificar_ollama(self):
@@ -33,22 +31,24 @@ class CursorAITradingClient:
             response = requests.get(f"{self.ollama_url}/api/tags", timeout=5)
             if response.status_code == 200:
                 models = response.json().get('models', [])
-                model_names = [model['name'] for model in models]
+                available_models = [model['name'] for model in models]
                 
-                if self.model_name not in model_names:
-                    logger.warning(f"Modelo {self.model_name} não encontrado. Modelos disponíveis: {model_names}")
-                    # Usar primeiro modelo disponível como fallback
-                    if model_names:
-                        self.model_name = model_names[0]
-                        logger.info(f"Usando modelo fallback: {self.model_name}")
-                else:
+                if self.model_name in available_models:
                     logger.info(f"Modelo {self.model_name} disponível")
+                else:
+                    # Usar primeiro modelo disponível
+                    if available_models:
+                        self.model_name = available_models[0]
+                        logger.info(f"Usando modelo disponível: {self.model_name}")
+                    else:
+                        raise Exception("Nenhum modelo disponível no Ollama")
             else:
-                logger.error("Não foi possível conectar ao Ollama")
+                raise Exception(f"Erro ao verificar Ollama: {response.status_code}")
                 
         except Exception as e:
             logger.error(f"Erro ao verificar Ollama: {e}")
-    
+            raise Exception("Ollama não está disponível - IA é obrigatória para o sistema")
+
     def analisar_dados_mercado(self, dados: Dict[str, Any]) -> Dict[str, Any]:
         """
         Analisa dados de mercado usando IA local ou análise técnica simples
@@ -60,11 +60,6 @@ class CursorAITradingClient:
             Dicionário com decisão de trading
         """
         try:
-            # Se estiver em modo fallback, usar análise técnica simples
-            if self.fallback_mode:
-                logger.info("Usando análise técnica simples (modo fallback)")
-                return self._analise_tecnica_simples(dados)
-            
             # Preparar prompt estruturado
             prompt = self._criar_prompt_trading(dados)
             
@@ -79,9 +74,7 @@ class CursorAITradingClient:
             
         except Exception as e:
             logger.error(f"Erro na análise IA: {e}")
-            logger.info("Ativando modo fallback - usando análise técnica simples")
-            self.fallback_mode = True
-            return self._analise_tecnica_simples(dados)
+            raise Exception(f"IA falhou na análise: {e} - Sistema requer IA funcional")
     
     def _criar_prompt_trading(self, dados: Dict[str, Any]) -> str:
         """
@@ -260,17 +253,17 @@ IMPORTANTE:
                 json_str = resposta[json_start:json_end]
                 decisao = json.loads(json_str)
                 
-                # Validar formato da resposta
+                # Validar resposta
                 if self._validar_resposta(decisao):
                     return decisao
-            
-            # Se não conseguir extrair JSON válido, usar fallback
-            logger.warning("Resposta da IA não contém JSON válido, usando fallback")
-            return self._decisao_fallback()
-            
-        except json.JSONDecodeError as e:
-            logger.error(f"Erro ao decodificar JSON da IA: {e}")
-            return self._decisao_fallback()
+                else:
+                    raise Exception("Resposta da IA inválida")
+            else:
+                raise Exception("Resposta da IA não contém JSON válido")
+                
+        except Exception as e:
+            logger.error(f"Erro ao processar resposta da IA: {e}")
+            raise Exception(f"Falha no processamento da resposta da IA: {e}")
     
     def _validar_resposta(self, resposta: Dict[str, Any]) -> bool:
         """
@@ -290,113 +283,6 @@ IMPORTANTE:
             return False
         
         return True
-    
-    def _decisao_fallback(self) -> Dict[str, Any]:
-        """
-        Retorna decisão de fallback em caso de erro
-        """
-        return {
-            "decisao": "aguardar",
-            "confianca": 0.0,
-            "razao": "Erro na análise de IA - usando fallback",
-            "parametros": {
-                "quantidade": 1,
-                "stop_loss": 100,
-                "take_profit": 200
-            },
-            "indicadores_analisados": []
-        }
-    
-    def _analise_tecnica_simples(self, dados: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Análise técnica simples como fallback quando IA não está disponível
-        """
-        try:
-            # Extrair indicadores
-            rsi = dados.get('rsi', 50.0)
-            macd = dados.get('macd', 0.0)
-            preco_atual = dados.get('preco_atual', 100000)
-            bb_upper = dados.get('bb_upper', preco_atual * 1.005)
-            bb_lower = dados.get('bb_lower', preco_atual * 0.995)
-            
-            # Calcular variação a partir dos dados disponíveis
-            preco_abertura = dados.get('preco_abertura', preco_atual)
-            if preco_abertura and preco_abertura > 0:
-                variacao = ((preco_atual - preco_abertura) / preco_abertura) * 100
-            else:
-                # Se não tiver preço de abertura, usar variação simulada baseada no preço
-                variacao = (preco_atual - 136500) / 136500 * 100  # Variação em relação a um preço base
-            
-            # Calcular sinais
-            sinais_compra = 0
-            sinais_venda = 0
-            confianca = 0.0
-            razao = []
-            
-            # RSI (MUITO AGGRESSIVO)
-            if rsi < 45:
-                sinais_compra += 1
-                razao.append("RSI sobrecompra")
-                confianca += 0.3
-            elif rsi > 55:
-                sinais_venda += 1
-                razao.append("RSI sobrevenda")
-                confianca += 0.3
-            
-            # MACD (MUITO AGGRESSIVO)
-            if macd > 1:
-                sinais_compra += 1
-                razao.append("MACD positivo")
-                confianca += 0.25
-            elif macd < -1:
-                sinais_venda += 1
-                razao.append("MACD negativo")
-                confianca += 0.25
-            
-            # Bandas de Bollinger (MUITO AGGRESSIVO)
-            if preco_atual <= bb_lower * 1.01:  # Próximo à banda inferior
-                sinais_compra += 1
-                razao.append("Próximo à banda inferior")
-                confianca += 0.2
-            elif preco_atual >= bb_upper * 0.99:  # Próximo à banda superior
-                sinais_venda += 1
-                razao.append("Próximo à banda superior")
-                confianca += 0.2
-            
-            # Variação (MUITO AGGRESSIVO)
-            if variacao > 0.05:
-                sinais_compra += 1
-                razao.append("Tendência de alta")
-                confianca += 0.15
-            elif variacao < -0.05:
-                sinais_venda += 1
-                razao.append("Tendência de baixa")
-                confianca += 0.15
-            
-            # Determinar decisão (MUITO AGGRESSIVO)
-            if sinais_compra > sinais_venda and confianca >= 0.2 and sinais_compra >= 2:
-                decisao = "comprar"
-            elif sinais_venda > sinais_compra and confianca >= 0.2 and sinais_venda >= 2:
-                decisao = "vender"
-            else:
-                decisao = "aguardar"
-                confianca = max(0.1, confianca * 0.5)  # Reduzir confiança para aguardar
-            
-            return {
-                "decisao": decisao,
-                "confianca": min(0.9, confianca),  # Limitar confiança máxima
-                "razao": " | ".join(razao) if razao else "Análise técnica simples",
-                "parametros": {
-                    "quantidade": 1,
-                    "stop_loss": 100,
-                    "take_profit": 200
-                },
-                "indicadores_analisados": ["rsi", "macd", "bollinger", "variacao"]
-            }
-            
-        except Exception as e:
-            logger.error(f"Erro na análise técnica simples: {e}")
-            return self._decisao_fallback()
     
     def testar_conexao(self) -> bool:
         """

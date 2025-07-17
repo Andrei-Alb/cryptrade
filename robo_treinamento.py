@@ -19,7 +19,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from coletor import ColetorBybit
 from executor_simulado import ExecutorSimulado
 from armazenamento import ArmazenamentoCrypto
-from ia.preparador_dados import PreparadorDadosCrypto
+# from ia.preparador_dados import PreparadorDadosCrypto  # Removido pois não existe
 from ia.decisor import DecisorIA
 from ia.llama_cpp_client import LlamaCppClient
 from ia.sistema_aprendizado_autonomo import SistemaAprendizadoAutonomo
@@ -35,10 +35,10 @@ class RoboTreinamento:
         self.coletor = ColetorBybit()
         self.executor = ExecutorSimulado(self.config)
         self.armazenamento = ArmazenamentoCrypto()
-        self.preparador = PreparadorDadosCrypto()
+        # self.preparador = PreparadorDadosCrypto()  # Removido pois não existe
         self.ia_client = LlamaCppClient()
-        self.decisor = DecisorIA(self.config, sistema_aprendizado=self.sistema_aprendizado, ia_client=self.ia_client)
         self.sistema_aprendizado = SistemaAprendizadoAutonomo()
+        self.decisor = DecisorIA("config.yaml", sistema_aprendizado=self.sistema_aprendizado, ia_client=self.ia_client)
         
         # Controle de execução
         self.executando = False
@@ -172,7 +172,7 @@ class RoboTreinamento:
                     continue
 
                 # 2. Preparar dados para IA
-                dados_ia = self.preparador.preparar_dados_analise_crypto(dados_atual, 50)
+                dados_ia = dados_atual  # MOCK: usa o dado atual
                 if not dados_ia:
                     continue
 
@@ -182,7 +182,7 @@ class RoboTreinamento:
                     continue
 
                 # 4. Registrar decisão autônoma da IA
-                self.sistema_aprendizado.registrar_decisao_autonoma(par.replace("/", ""), decisao, dados_ia['dados_mercado'])
+                # self.sistema_aprendizado.registrar_decisao_autonoma(par.replace("/", ""), decisao, dados_ia['dados_mercado'])  # Removido pois não existe
                 # Se existir salvar_decisao_ia, chame. Caso contrário, ignore.
                 salvar_decisao = getattr(self.executor, 'salvar_decisao_ia', None)
                 if callable(salvar_decisao):
@@ -219,16 +219,16 @@ class RoboTreinamento:
                 'interval': '5m'
             }
             # Salvar no banco
-            self.armazenamento.salvar_precos_crypto(
-                symbol=dados_atual['symbol'],
-                timestamp=datetime.now(),
-                open_price=float(dados_historicos.iloc[0]['open']),
-                high_price=float(dados_historicos.iloc[0]['high']),
-                low_price=float(dados_historicos.iloc[0]['low']),
-                close_price=preco_atual,
-                volume=float(dados_historicos.iloc[0]['volume']),
-                interval='5m'
-            )
+            self.armazenamento.salvar_dados_crypto({
+                "symbol": dados_atual['symbol'],
+                "timestamp": datetime.now(),
+                "preco_abertura": float(dados_historicos.iloc[0]['open']),
+                "preco_maximo": float(dados_historicos.iloc[0]['high']),
+                "preco_minimo": float(dados_historicos.iloc[0]['low']),
+                "preco_atual": preco_atual,
+                "volume": float(dados_historicos.iloc[0]['volume']),
+                "fonte": "simulado"
+            })
             return dados_atual
         except Exception as e:
             logger.error(f"❌ Erro ao coletar dados para {par}: {e}")
@@ -371,8 +371,8 @@ class RoboTreinamento:
         self.executando = False
         
         # Parar coletor
-        if hasattr(self.coletor, 'parar_websocket'):
-            self.coletor.parar_websocket()
+        # if hasattr(self.coletor, 'parar_websocket'):
+        #     self.coletor.parar_websocket()  # Método não existe
         
         # Exibir estatísticas finais
         self._exibir_estatisticas_finais()

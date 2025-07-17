@@ -5,7 +5,42 @@ import requests
 from tabulate import tabulate
 from datetime import datetime
 
-DB_PATH = 'dados/crypto_trading.db'
+DB_PATH = 'dados/trading.db'
+
+# Garantir que a tabela ordens_dinamicas existe (schema unificado)
+import sqlite3
+conn = sqlite3.connect(DB_PATH)
+c = conn.cursor()
+c.execute('''
+CREATE TABLE IF NOT EXISTS ordens_dinamicas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id TEXT UNIQUE NOT NULL,
+    symbol TEXT NOT NULL,
+    tipo_ordem TEXT NOT NULL,
+    preco_entrada REAL NOT NULL,
+    quantidade REAL NOT NULL,
+    stop_loss_inicial REAL,
+    take_profit_inicial REAL,
+    stop_loss_atual REAL,
+    take_profit_atual REAL,
+    status TEXT NOT NULL,
+    timestamp_abertura DATETIME DEFAULT CURRENT_TIMESTAMP,
+    timestamp_fechamento DATETIME,
+    preco_saida REAL,
+    lucro_prejuizo REAL,
+    tempo_aberta_segundos INTEGER,
+    ajustes_stop_loss INTEGER DEFAULT 0,
+    ajustes_take_profit INTEGER DEFAULT 0,
+    saida_inteligente_utilizada BOOLEAN DEFAULT FALSE,
+    razao_saida TEXT,
+    dados_mercado_saida TEXT,
+    previsoes_ia TEXT,
+    cenarios_ia TEXT,
+    justificativa_ia TEXT
+)
+''')
+conn.commit()
+conn.close()
 
 # Garante que o diretório do banco existe
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -131,6 +166,7 @@ def main():
             # Preparar dados para tabela
             table_data = []
             for ordem in orders_with_pnl:
+                alvo_str = f"${ordem['take_profit']:.2f}" if ordem['take_profit'] else "N/A"
                 table_data.append([
                     ordem['order_id'][:20] + "...",
                     ordem['symbol'],
@@ -138,6 +174,7 @@ def main():
                     f"${ordem['preco_entrada']:.2f}",
                     f"{ordem['quantidade']:.6f}",
                     f"${ordem['preco_atual']:.2f}",
+                    alvo_str,
                     f"${ordem['pnl_value']:.4f}",
                     f"{ordem['pnl_percent']:+.2f}%",
                     ordem['data_abertura'][:16] if ordem['data_abertura'] else "N/A"
@@ -147,7 +184,7 @@ def main():
             print("\n📈 ORDENS ABERTAS (PnL em Tempo Real)")
             print(tabulate(table_data, headers=[
                 "Order ID", "Symbol", "Tipo", "Preço Entrada", "Qtd", 
-                "Preço Atual", "PnL ($)", "PnL (%)", "Data Abertura"
+                "Preço Atual", "Alvo IA", "PnL ($)", "PnL (%)", "Data Abertura"
             ], tablefmt="grid"))
             
             print(f"\n💰 PnL Total das Ordens Abertas: ${total_pnl:.4f}")

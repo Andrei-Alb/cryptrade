@@ -50,7 +50,7 @@ class ConfiguracaoOrdem:
 
 class GestorOrdensDinamico:
     """Gestor de ordens onde a IA tem controle total sobre saídas"""
-    def __init__(self, db_path: str = "dados/crypto_trading.db", risco_maximo_permitido: float = 3.0, decisor_ia=None, sistema_aprendizado=None):
+    def __init__(self, db_path: str = "dados/trading.db", risco_maximo_permitido: float = 3.0, decisor_ia=None, sistema_aprendizado=None):
         """
         Inicializa gestor de ordens dinâmico
         Args:
@@ -91,10 +91,10 @@ class GestorOrdensDinamico:
                     tipo_ordem TEXT NOT NULL,
                     preco_entrada REAL NOT NULL,
                     quantidade REAL NOT NULL,
-                    stop_loss_inicial REAL NOT NULL,
-                    take_profit_inicial REAL NOT NULL,
-                    stop_loss_atual REAL NOT NULL,
-                    take_profit_atual REAL NOT NULL,
+                    stop_loss_inicial REAL,
+                    take_profit_inicial REAL,
+                    stop_loss_atual REAL,
+                    take_profit_atual REAL,
                     status TEXT NOT NULL,
                     timestamp_abertura DATETIME DEFAULT CURRENT_TIMESTAMP,
                     timestamp_fechamento DATETIME,
@@ -105,7 +105,11 @@ class GestorOrdensDinamico:
                     ajustes_take_profit INTEGER DEFAULT 0,
                     saida_inteligente_utilizada BOOLEAN DEFAULT FALSE,
                     razao_saida TEXT,
-                    dados_mercado_saida TEXT
+                    dados_mercado_saida TEXT,
+                    confianca_ia REAL,
+                    previsoes_ia TEXT,
+                    cenarios_ia TEXT,
+                    justificativa_ia TEXT
                 )
             """)
             
@@ -226,55 +230,17 @@ class GestorOrdensDinamico:
     
     def _calcular_stop_take_dinamico(self, tipo_ordem: TipoOrdem, preco_entrada: float,
                                    dados_mercado: Dict[str, Any], confianca_ia: float) -> Tuple[float, float]:
-        """Calcula stop loss e take profit dinâmicos baseado na IA"""
+        """Calcula stop loss e take profit dinâmicos baseado na volatilidade"""
+        volatilidade = dados_mercado.get('volatilidade', 0.2)
+        N = 0.005  # multiplicador do alvo - EXTREMAMENTE REDUZIDO para alvos curtos ($4-$13)
+        M = 0.003  # multiplicador do stop - EXTREMAMENTE REDUZIDO para stops curtos ($3-$7)
         
-        # Calcular take profit baseado na confiança e volatilidade
-        volatilidade = dados_mercado.get('volatilidade', 0.02)
-        rsi = dados_mercado.get('rsi', 50.0)
-        tendencia = dados_mercado.get('tendencia', 'lateral')
-        
-        # Take profit dinâmico
         if tipo_ordem == TipoOrdem.COMPRA:
-            # Para compras: take profit acima do preço de entrada
-            take_profit_pct = 2.0 + (confianca_ia * 3.0)  # 2% a 5% baseado na confiança
-            take_profit = preco_entrada * (1 + take_profit_pct / 100)
-            
-            # Ajustar baseado na tendência
-            if tendencia == 'alta':
-                take_profit *= 1.1
-            elif tendencia == 'baixa':
-                take_profit *= 0.9
-            
-        else:  # VENDA
-            # Para vendas: take profit abaixo do preço de entrada
-            take_profit_pct = 2.0 + (confianca_ia * 3.0)  # 2% a 5% baseado na confiança
-            take_profit = preco_entrada * (1 - take_profit_pct / 100)
-            
-            # Ajustar baseado na tendência
-            if tendencia == 'baixa':
-                take_profit *= 0.9
-            elif tendencia == 'alta':
-                take_profit *= 1.1
-        
-        # Stop loss = 50% do alvo (conforme solicitado)
-        if tipo_ordem == TipoOrdem.COMPRA:
-            # Para compras: stop loss abaixo do preço de entrada
-            stop_loss = preco_entrada - (abs(take_profit - preco_entrada) * 0.5)
+            take_profit = preco_entrada + (N * volatilidade * preco_entrada)
+            stop_loss = preco_entrada - (M * volatilidade * preco_entrada)
         else:
-            # Para vendas: stop loss acima do preço de entrada
-            stop_loss = preco_entrada + (abs(preco_entrada - take_profit) * 0.5)
-        
-        # Validar valores para evitar valores irrealistas
-        if tipo_ordem == TipoOrdem.COMPRA:
-            # Stop loss não pode ser menor que 90% do preço de entrada
-            stop_loss_min = preco_entrada * 0.90
-            if stop_loss < stop_loss_min:
-                stop_loss = stop_loss_min
-        else:
-            # Stop loss não pode ser maior que 110% do preço de entrada
-            stop_loss_max = preco_entrada * 1.10
-            if stop_loss > stop_loss_max:
-                stop_loss = stop_loss_max
+            take_profit = preco_entrada - (N * volatilidade * preco_entrada)
+            stop_loss = preco_entrada + (M * volatilidade * preco_entrada)
         
         return stop_loss, take_profit
     
@@ -349,29 +315,33 @@ class GestorOrdensDinamico:
     def _calcular_novo_stop_loss(self, tipo_ordem: TipoOrdem, preco_atual: float,
                                stop_loss_atual: float, preco_entrada: float,
                                dados_mercado: Dict[str, Any]) -> float:
-        """Calcula novo stop loss baseado na direção do preço"""
+        """Calcula novo stop loss baseado na volatilidade e lucro atual"""
+        volatilidade = dados_mercado.get('volatilidade', 0.02)
+        M = 0.2  # multiplicador reduzido para trailing stop mais conservador
         
+        # Calcular lucro atual
         if tipo_ordem == TipoOrdem.COMPRA:
-            # Para compras
-            if preco_atual > preco_entrada:
-                # Preço subindo - mover stop loss para cima (proteger lucro)
-                distancia_atual = preco_atual - stop_loss_atual
-                novo_stop_loss = preco_atual - (distancia_atual * 0.3)  # 30% da distância
-                return max(stop_loss_atual, novo_stop_loss)  # Só move para cima
+            lucro_atual = (preco_atual - preco_entrada) / preco_entrada
+            # Se tem lucro, trailing stop fica mais próximo
+            if lucro_atual > 0.001:  # 0.1% de lucro
+                novo_stop = preco_atual - (M * volatilidade * preco_atual)
+                # Garantir que não fique abaixo do preço de entrada se lucro for pequeno
+                if lucro_atual < 0.005:  # 0.5% de lucro
+                    novo_stop = max(novo_stop, preco_entrada)
             else:
-                # Preço caindo - manter stop loss atual
-                return stop_loss_atual
-                
-        else:  # VENDA
-            # Para vendas
-            if preco_atual < preco_entrada:
-                # Preço caindo - mover stop loss para baixo (proteger lucro)
-                distancia_atual = stop_loss_atual - preco_atual
-                novo_stop_loss = preco_atual + (distancia_atual * 0.3)  # 30% da distância
-                return min(stop_loss_atual, novo_stop_loss)  # Só move para baixo
+                novo_stop = stop_loss_atual
+        else:
+            lucro_atual = (preco_entrada - preco_atual) / preco_entrada
+            # Se tem lucro, trailing stop fica mais próximo
+            if lucro_atual > 0.001:  # 0.1% de lucro
+                novo_stop = preco_atual + (M * volatilidade * preco_atual)
+                # Garantir que não fique acima do preço de entrada se lucro for pequeno
+                if lucro_atual < 0.005:  # 0.5% de lucro
+                    novo_stop = min(novo_stop, preco_entrada)
             else:
-                # Preço subindo - manter stop loss atual
-                return stop_loss_atual
+                novo_stop = stop_loss_atual
+        
+        return novo_stop
     
     def _deve_ajustar_stop_loss(self, tipo_ordem: TipoOrdem, novo_stop_loss: float,
                               stop_loss_atual: float) -> bool:
@@ -908,26 +878,33 @@ class GestorOrdensDinamico:
         }
     
     def _salvar_ordem_dinamica(self, order_id: str, symbol: str, tipo_ordem: TipoOrdem,
-                             preco_entrada: float, quantidade: float, config: ConfiguracaoOrdem):
+                             preco_entrada: float, quantidade: float, config: ConfiguracaoOrdem,
+                             confianca_ia: float = 0.5, previsoes_ia: Optional[dict] = None):
         """Salva ordem dinâmica no banco de dados"""
         try:
+            import json
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-            
+
+            previsoes_str = json.dumps(previsoes_ia) if previsoes_ia else None
+            cenarios_str = json.dumps(previsoes_ia.get('cenarios', {})) if previsoes_ia and 'cenarios' in previsoes_ia else None
+            justificativa = previsoes_ia.get('justificativa', "") if previsoes_ia and 'justificativa' in previsoes_ia else None
+
             cursor.execute("""
                 INSERT INTO ordens_dinamicas 
                 (order_id, symbol, tipo_ordem, preco_entrada, quantidade,
-                 stop_loss_inicial, take_profit_inicial, stop_loss_atual, take_profit_atual, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 stop_loss_inicial, take_profit_inicial, stop_loss_atual, take_profit_atual, 
+                 status, confianca_ia, previsoes_ia, cenarios_ia, justificativa_ia)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 order_id, symbol, tipo_ordem.value, preco_entrada, quantidade,
                 config.stop_loss_inicial, config.take_profit_inicial,
-                config.stop_loss_atual, config.take_profit_atual, 'aberta'
+                config.stop_loss_atual, config.take_profit_atual, 'aberta',
+                confianca_ia, previsoes_str, cenarios_str, justificativa
             ))
-            
+
             conn.commit()
             conn.close()
-            
         except Exception as e:
             logger.error(f"❌ Erro ao salvar ordem dinâmica: {e}")
     

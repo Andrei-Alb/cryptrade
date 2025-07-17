@@ -41,8 +41,8 @@ class ExecutorOrdensSimuladas:
         c.execute('''
         CREATE TABLE IF NOT EXISTS ordens_simuladas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id TEXT UNIQUE,
             timestamp DATETIME NOT NULL,
-            ordem_id TEXT UNIQUE,
             tipo TEXT NOT NULL,
             simbolo TEXT NOT NULL,
             quantidade INTEGER NOT NULL,
@@ -442,3 +442,163 @@ def enviar_ordem(tipo: str, quantidade: int, preco: float, simbolo: str) -> Dict
         {'decisao': tipo, 'confianca': 0.7},
         {'preco_atual': preco, 'simbolo': simbolo}
     ) 
+
+class ExecutorBybit:
+    """Executor de ordens reais na Bybit"""
+    
+    def __init__(self, config: dict = None):
+        """
+        Inicializa executor de ordens reais na Bybit
+        
+        Args:
+            config: Configurações do sistema
+        """
+        self.config = config or {}
+        self.api_key = self.config.get('exchange', {}).get('api_key') or os.getenv('BYBIT_API_KEY')
+        self.api_secret = self.config.get('exchange', {}).get('api_secret') or os.getenv('BYBIT_API_SECRET')
+        self.testnet = self.config.get('exchange', {}).get('testnet', False)
+        
+        if not self.api_key or not self.api_secret:
+            logger.error("❌ Credenciais da Bybit não configuradas")
+            raise ValueError("Credenciais da Bybit não configuradas")
+        
+        # Configurar cliente Bybit
+        try:
+            from pybit.unified_trading import HTTP
+            self.client = HTTP(
+                api_key=self.api_key,
+                api_secret=self.api_secret,
+                testnet=self.testnet
+            )
+            logger.info("✅ Cliente Bybit inicializado")
+        except ImportError:
+            logger.error("❌ pybit não instalado. Instale com: pip install pybit")
+            raise
+        except Exception as e:
+            logger.error(f"❌ Erro ao inicializar cliente Bybit: {e}")
+            raise
+    
+    def obter_saldo(self, moeda: str = "USDT") -> float:
+        """Obtém saldo da conta"""
+        try:
+            response = self.client.get_wallet_balance(accountType="UNIFIED", coin=moeda)
+            if response.get('retCode') == 0:
+                return float(response['result']['list'][0]['totalWalletBalance'])
+            else:
+                logger.error(f"Erro ao obter saldo: {response.get('retMsg')}")
+                return 0.0
+        except Exception as e:
+            logger.error(f"Erro ao obter saldo: {e}")
+            return 0.0
+    
+    def obter_preco_atual(self, symbol: str) -> float:
+        """Obtém preço atual de um símbolo"""
+        try:
+            response = self.client.get_tickers(category="spot", symbol=symbol)
+            if response.get('retCode') == 0 and response['result']['list']:
+                return float(response['result']['list'][0]['lastPrice'])
+            else:
+                logger.error(f"Erro ao obter preço de {symbol}: {response.get('retMsg')}")
+                return 0.0
+        except Exception as e:
+            logger.error(f"Erro ao obter preço de {symbol}: {e}")
+            return 0.0
+    
+    def executar_ordem(self, decisao: dict, dados_mercado: dict) -> dict:
+        """
+        Executa ordem real na Bybit
+        
+        Args:
+            decisao: Decisão da IA
+            dados_mercado: Dados do mercado
+            
+        Returns:
+            Resultado da execução
+        """
+        try:
+            if decisao['decisao'] not in ['comprar', 'vender']:
+                return {'status': 'ignorado', 'razao': 'Decisão não é compra/venda'}
+            
+            symbol = dados_mercado.get('symbol', 'BTCUSDT')
+            preco_atual = dados_mercado.get('preco_atual', 0)
+            quantidade = self.config.get('trading', {}).get('quantidade_padrao', 0.001)
+            
+            if preco_atual <= 0:
+                return {'status': 'erro', 'razao': 'Preço inválido'}
+            
+            # Calcular quantidade baseada no capital disponível
+            saldo = self.obter_saldo()
+            if saldo <= 0:
+                return {'status': 'erro', 'razao': 'Saldo insuficiente'}
+            
+            # Limitar quantidade para não exceder o capital
+            valor_maximo = saldo * 0.1  # Máximo 10% do saldo por ordem
+            quantidade = min(quantidade, valor_maximo / preco_atual)
+            
+            # Executar ordem de mercado
+            side = "Buy" if decisao['decisao'] == 'comprar' else "Sell"
+            
+            response = self.client.place_order(
+                category="spot",
+                symbol=symbol,
+                side=side,
+                orderType="Market",
+                qty=str(quantidade)
+            )
+            
+            if response.get('retCode') == 0:
+                order_id = response['result']['orderId']
+                logger.info(f"✅ Ordem executada: {side} {quantidade} {symbol} @ {preco_atual}")
+                return {
+                    'status': 'executada',
+                    'order_id': order_id,
+                    'side': side,
+                    'quantidade': quantidade,
+                    'preco': preco_atual
+                }
+            else:
+                logger.error(f"❌ Erro ao executar ordem: {response.get('retMsg')}")
+                return {'status': 'erro', 'razao': response.get('retMsg')}
+                
+        except Exception as e:
+            logger.error(f"Erro ao executar ordem: {e}")
+            return {'status': 'erro', 'razao': str(e)}
+    
+    def fechar_ordem(self, order_id: str, symbol: str) -> dict:
+        """Fecha uma ordem específica"""
+        try:
+            response = self.client.cancel_order(
+                category="spot",
+                symbol=symbol,
+                orderId=order_id
+            )
+            
+            if response.get('retCode') == 0:
+                logger.info(f"✅ Ordem {order_id} fechada")
+                return {'status': 'fechada', 'order_id': order_id}
+            else:
+                logger.error(f"❌ Erro ao fechar ordem: {response.get('retMsg')}")
+                return {'status': 'erro', 'razao': response.get('retMsg')}
+                
+        except Exception as e:
+            logger.error(f"Erro ao fechar ordem: {e}")
+            return {'status': 'erro', 'razao': str(e)}
+    
+    def obter_ordens_ativas(self, symbol: str = None) -> list:
+        """Obtém lista de ordens ativas"""
+        try:
+            params = {"category": "spot"}
+            if symbol:
+                params["symbol"] = symbol
+                
+            response = self.client.get_open_orders(**params)
+            
+            if response.get('retCode') == 0:
+                return response['result']['list']
+            else:
+                logger.error(f"Erro ao obter ordens ativas: {response.get('retMsg')}")
+                return []
+                
+        except Exception as e:
+            logger.error(f"Erro ao obter ordens ativas: {e}")
+            return [] 

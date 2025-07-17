@@ -17,7 +17,7 @@ from gestor_ordens_dinamico import GestorOrdensDinamico, TipoOrdem
 class ExecutorSimulado:
     """Executor que simula operações para treinamento da IA, com ciclo realista de ordens"""
     
-    def __init__(self, config: Dict[str, Any], db_path: str = "dados/crypto_trading.db"):
+    def __init__(self, config: Dict[str, Any], db_path: str = "dados/trading.db"):
         self.config = config
         self.db_path = db_path
         self.capital_atual = config['simulacao']['capital_inicial']
@@ -130,3 +130,25 @@ class ExecutorSimulado:
         preco_base = precos_base.get(symbol, 100.0)
         variacao = random.uniform(-0.01, 0.01)  # ±1%
         return preco_base * (1 + variacao) 
+
+    def obter_estatisticas_ordens_simuladas(self):
+        """Obtém estatísticas detalhadas das ordens simuladas"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT lucro_prejuizo FROM ordens_dinamicas WHERE status = 'fechada'")
+        resultados = cursor.fetchall()
+        conn.close()
+        total = len(resultados)
+        wins = sum(1 for (lucro,) in resultados if lucro is not None and lucro > 0)
+        losses = sum(1 for (lucro,) in resultados if lucro is not None and lucro < 0)
+        neutras = sum(1 for (lucro,) in resultados if lucro is not None and lucro == 0)
+        pnl_total = sum(lucro for (lucro,) in resultados if lucro is not None)
+        win_rate = (wins / (wins + losses) * 100) if (wins + losses) > 0 else 0.0
+        return {
+            'total': total,
+            'wins': wins,
+            'losses': losses,
+            'neutras': neutras,
+            'win_rate': win_rate,
+            'pnl_total': pnl_total
+        } 

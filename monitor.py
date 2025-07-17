@@ -160,6 +160,84 @@ def obter_estatisticas_aprendizado_rapido():
         logger.error(f"Erro ao obter estatísticas de aprendizado: {e}")
         return {}
 
+def obter_estatisticas_previsoes_rapido():
+    """
+    Obtém estatísticas de previsões da IA de forma otimizada
+    """
+    try:
+        db_path = "dados/trading.db"
+        if not os.path.exists(db_path):
+            return {}
+        
+        conn = sqlite3.connect(db_path)
+        c = conn.cursor()
+        
+        # Verificar se tabela existe
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='analise_previsoes_ia'")
+        if not c.fetchone():
+            conn.close()
+            return {'mensagem': 'Nenhuma análise de previsões encontrada'}
+        
+        # Obter data de hoje e início da semana
+        hoje = datetime.now().date()
+        inicio_semana = hoje - timedelta(days=hoje.weekday())
+        
+        # Estatísticas de hoje
+        c.execute(f"SELECT COUNT(*) FROM analise_previsoes_ia WHERE DATE(timestamp) = '{hoje}'")
+        total_analises_hoje = c.fetchone()[0]
+        
+        c.execute(f"SELECT COUNT(*) FROM analise_previsoes_ia WHERE precisao_target = 'acerto' AND DATE(timestamp) = '{hoje}'")
+        targets_acertos_hoje = c.fetchone()[0]
+        
+        c.execute(f"SELECT COUNT(*) FROM analise_previsoes_ia WHERE precisao_stop = 'acerto' AND DATE(timestamp) = '{hoje}'")
+        stops_acertos_hoje = c.fetchone()[0]
+        
+        c.execute(f"SELECT COUNT(*) FROM analise_previsoes_ia WHERE resultado_real = 'win' AND DATE(timestamp) = '{hoje}'")
+        wins_hoje = c.fetchone()[0]
+        
+        # Estatísticas da semana
+        c.execute(f"SELECT COUNT(*) FROM analise_previsoes_ia WHERE DATE(timestamp) >= '{inicio_semana}'")
+        total_analises_semana = c.fetchone()[0]
+        
+        c.execute(f"SELECT COUNT(*) FROM analise_previsoes_ia WHERE precisao_target = 'acerto' AND DATE(timestamp) >= '{inicio_semana}'")
+        targets_acertos_semana = c.fetchone()[0]
+        
+        c.execute(f"SELECT COUNT(*) FROM analise_previsoes_ia WHERE precisao_stop = 'acerto' AND DATE(timestamp) >= '{inicio_semana}'")
+        stops_acertos_semana = c.fetchone()[0]
+        
+        c.execute(f"SELECT COUNT(*) FROM analise_previsoes_ia WHERE resultado_real = 'win' AND DATE(timestamp) >= '{inicio_semana}'")
+        wins_semana = c.fetchone()[0]
+        
+        conn.close()
+        
+        # Calcular taxas de precisão
+        precisao_target_hoje = (targets_acertos_hoje / total_analises_hoje * 100) if total_analises_hoje > 0 else 0
+        precisao_stop_hoje = (stops_acertos_hoje / total_analises_hoje * 100) if total_analises_hoje > 0 else 0
+        win_rate_hoje = (wins_hoje / total_analises_hoje * 100) if total_analises_hoje > 0 else 0
+        
+        precisao_target_semana = (targets_acertos_semana / total_analises_semana * 100) if total_analises_semana > 0 else 0
+        precisao_stop_semana = (stops_acertos_semana / total_analises_semana * 100) if total_analises_semana > 0 else 0
+        win_rate_semana = (wins_semana / total_analises_semana * 100) if total_analises_semana > 0 else 0
+        
+        return {
+            'hoje': {
+                'total_analises': total_analises_hoje,
+                'precisao_target': precisao_target_hoje,
+                'precisao_stop': precisao_stop_hoje,
+                'win_rate': win_rate_hoje
+            },
+            'semana': {
+                'total_analises': total_analises_semana,
+                'precisao_target': precisao_target_semana,
+                'precisao_stop': precisao_stop_semana,
+                'win_rate': win_rate_semana
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Erro ao obter estatísticas de previsões: {e}")
+        return {}
+
 def exibir_monitor_otimizado():
     """
     Exibe monitor otimizado e rápido
@@ -198,95 +276,89 @@ def exibir_monitor_otimizado():
             # Estatísticas básicas otimizadas
             try:
                 stats_banco = obter_estatisticas_banco_rapido()
+                
                 if stats_banco:
-                    print("📈 ESTATÍSTICAS DE HOJE:")
-                    print(f"   📊 Preços coletados: {stats_banco.get('total_precos_hoje', 0):,}")
-                    print(f"   🤖 Análises realizadas: {stats_banco.get('total_analises_hoje', 0):,}")
-                    print(f"   🚀 Ordens executadas: {stats_banco.get('total_ordens_hoje', 0):,}")
+                    print("📈 ESTATÍSTICAS BÁSICAS:")
+                    print(f"   📊 Preços hoje: {stats_banco.get('total_precos_hoje', 0)}")
+                    print(f"   🧠 Análises hoje: {stats_banco.get('total_analises_hoje', 0)}")
+                    print(f"   📋 Ordens hoje: {stats_banco.get('total_ordens_hoje', 0)}")
                     
-                    print("\n📈 ESTATÍSTICAS DA SEMANA:")
-                    print(f"   📊 Preços coletados: {stats_banco.get('total_precos_semana', 0):,}")
-                    print(f"   🤖 Análises realizadas: {stats_banco.get('total_analises_semana', 0):,}")
-                    print(f"   🚀 Ordens executadas: {stats_banco.get('total_ordens_semana', 0):,}")
-                    
-                    # Preços em tempo real
-                    print("\n💰 PREÇOS EM TEMPO REAL:")
-                    if 'ultimo_preco_ibov' in stats_banco:
-                        ibov = stats_banco['ultimo_preco_ibov']
-                        tempo_atras = datetime.now() - datetime.fromisoformat(ibov['timestamp'])
-                        emoji = "🟢" if tempo_atras.seconds <= 5 else "🟡" if tempo_atras.seconds <= 15 else "🔴"
-                        print(f"   {emoji} IBOV: {ibov['preco']:,.2f} ({tempo_atras.seconds}s atrás)")
-                    
-                    if 'ultimo_preco_win' in stats_banco:
-                        win = stats_banco['ultimo_preco_win']
-                        tempo_atras = datetime.now() - datetime.fromisoformat(win['timestamp'])
-                        emoji = "🟢" if tempo_atras.seconds <= 5 else "🟡" if tempo_atras.seconds <= 15 else "🔴"
-                        print(f"   {emoji} WIN: {win['preco']:,.2f} ({tempo_atras.seconds}s atrás)")
+                    # Último preço IBOV
+                    ultimo_ibov = stats_banco.get('ultimo_preco_ibov')
+                    if ultimo_ibov:
+                        print(f"   📊 IBOV: {ultimo_ibov['preco']:.2f} ({ultimo_ibov['timestamp']})")
                     
                     # Última análise
-                    if 'ultima_analise' in stats_banco:
-                        analise = stats_banco['ultima_analise']
-                        tempo_atras = datetime.now() - datetime.fromisoformat(analise['timestamp'])
-                        resultado = analise['resultado'].upper() if analise['resultado'] else 'N/A'
-                        emoji = "⏳" if 'aguardar' in resultado.lower() else "📈" if 'comprar' in resultado.lower() else "📉"
-                        print(f"   🔍 Última análise: {emoji} {resultado} | Confiança: {analise['confianca']:.2f} ({tempo_atras.seconds}s atrás)")
-                    
-                    print()
-            except Exception as e:
-                print("   ⚠️ Erro ao carregar estatísticas")
+                    ultima_analise = stats_banco.get('ultima_analise')
+                    if ultima_analise:
+                        print(f"   🧠 Última análise: {ultima_analise['resultado']} (conf: {ultima_analise['confianca']:.2f})")
+                
                 print()
-            
-            # Performance de aprendizado otimizada
-            try:
+                
+                # Estatísticas de aprendizado
                 stats_aprendizado = obter_estatisticas_aprendizado_rapido()
+                
                 if stats_aprendizado:
-                    print("🎯 PERFORMANCE DE APRENDIZADO:")
+                    print("🎯 ESTATÍSTICAS DE APRENDIZADO:")
                     
-                    # Dados de hoje
                     hoje = stats_aprendizado.get('hoje', {})
                     if hoje.get('total_ordens', 0) > 0:
-                        print("   📅 HOJE:")
-                        print(f"      ✅ Wins: {hoje.get('wins', 0)} | ❌ Losses: {hoje.get('losses', 0)}")
-                        print(f"      📈 Taxa de acerto: {hoje.get('taxa_acerto', 0):.1f}%")
-                        print(f"      💰 Lucro total: {hoje.get('lucro_total', 0):.2f}%")
+                        print(f"   📅 HOJE: {hoje['total_ordens']} ordens | {hoje['taxa_acerto']:.1f}% acerto | {hoje['lucro_total']:+.2f}%")
                     
-                    # Dados da semana
                     semana = stats_aprendizado.get('semana', {})
                     if semana.get('total_ordens', 0) > 0:
-                        print("   📅 SEMANA:")
-                        print(f"      ✅ Wins: {semana.get('wins', 0)} | ❌ Losses: {semana.get('losses', 0)}")
-                        print(f"      📈 Taxa de acerto: {semana.get('taxa_acerto', 0):.1f}%")
-                        print(f"      💰 Lucro total: {semana.get('lucro_total', 0):.2f}%")
+                        print(f"   📅 SEMANA: {semana['total_ordens']} ordens | {semana['taxa_acerto']:.1f}% acerto | {semana['lucro_total']:+.2f}%")
                     
-                    # Ordens ativas
                     ordens_ativas = stats_aprendizado.get('ordens_ativas', 0)
                     if ordens_ativas > 0:
                         print(f"   🔄 Ordens ativas: {ordens_ativas}")
+                
+                print()
+                
+                # Estatísticas de previsões da IA
+                stats_previsoes = obter_estatisticas_previsoes_rapido()
+                
+                if isinstance(stats_previsoes, dict) and 'mensagem' not in stats_previsoes:
+                    print("🎯 ESTATÍSTICAS DE PREVISÕES IA:")
                     
-                    if hoje.get('total_ordens', 0) == 0 and semana.get('total_ordens', 0) == 0:
-                        print("   📅 Nenhuma ordem simulada hoje ou esta semana")
+                    hoje = stats_previsoes.get('hoje', {})
+                    if isinstance(hoje, dict) and hoje.get('total_analises', 0) > 0:
+                        print(f"   📅 HOJE: {hoje.get('total_analises', 0)} análises")
+                        print(f"      🎯 Target: {hoje.get('precisao_target', 0):.1f}% | 🛑 Stop: {hoje.get('precisao_stop', 0):.1f}% | 📊 Win Rate: {hoje.get('win_rate', 0):.1f}%")
                     
-                    print()
-                else:
-                    print("🎯 APRENDIZADO: Nenhuma ordem simulada ainda")
-                    print()
+                    semana = stats_previsoes.get('semana', {})
+                    if isinstance(semana, dict) and semana.get('total_analises', 0) > 0:
+                        print(f"   📅 SEMANA: {semana.get('total_analises', 0)} análises")
+                        print(f"      🎯 Target: {semana.get('precisao_target', 0):.1f}% | 🛑 Stop: {semana.get('precisao_stop', 0):.1f}% | 📊 Win Rate: {semana.get('win_rate', 0):.1f}%")
+                elif isinstance(stats_previsoes, dict) and 'mensagem' in stats_previsoes:
+                    print("🎯 PREVISÕES IA:")
+                    print(f"   ℹ️  {stats_previsoes.get('mensagem', '')}")
+                
+                print()
+                
             except Exception as e:
-                print("   ⚠️ Erro ao carregar aprendizado")
+                print(f"❌ Erro ao obter estatísticas: {e}")
                 print()
             
-            print("=" * 60)
-            print("💡 Ctrl+C para sair | ./parar_robo.sh para parar")
-            print("=" * 60)
+            # Comandos disponíveis
+            print("🔧 COMANDOS DISPONÍVEIS:")
+            print("   🚀 ./executar_robo.sh - Iniciar robô")
+            print("   🛑 ./parar_robo.sh - Parar robô")
+            print("   ❌ ./encerrar_ordens.sh - Fechar todas as ordens")
+            print("   📊 ./monitor.py - Atualizar monitor")
+            print("   🔄 Ctrl+C - Sair do monitor")
+            print()
             
-            # Aguardar 0.5 segundos (mais rápido)
-            time.sleep(0.5)
+            # Aguardar próximo update
+            print("⏳ Atualizando em 5 segundos... (Ctrl+C para sair)")
+            time.sleep(5)
             
         except KeyboardInterrupt:
-            print("\n👋 Monitor encerrado")
+            print("\n👋 Monitor encerrado!")
             break
         except Exception as e:
             print(f"❌ Erro no monitor: {e}")
-            time.sleep(2)
+            time.sleep(5)
 
 def main():
     """

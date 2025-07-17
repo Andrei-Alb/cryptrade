@@ -62,7 +62,32 @@ echo ""
 echo "🚀 INICIANDO ROBÔ COMPLETO..."
 echo "📊 Logs serão salvos em logs/robo_completo.log"
 echo "🛑 Para parar: Ctrl+C"
+echo "🛑 Para encerrar ordens: ./encerrar_ordens.sh ou python encerrar_ordens.py"
 echo ""
+
+# Checar se o modelo IA principal está disponível
+MODELO_IA="phi3:mini"
+MODELO_FALLBACK="llama2:7b-chat"
+
+if ! ollama list | grep -q "$MODELO_IA"; then
+    echo "❌ Modelo IA principal '$MODELO_IA' não encontrado. Instale com: ollama pull $MODELO_IA"
+    exit 1
+else
+    echo "✅ Modelo IA principal '$MODELO_IA' disponível."
+fi
+
+if ! ollama list | grep -q "$MODELO_FALLBACK"; then
+    echo "⚠️ Modelo fallback '$MODELO_FALLBACK' não encontrado. Recomenda-se instalar com: ollama pull $MODELO_FALLBACK"
+else
+    echo "✅ Modelo fallback '$MODELO_FALLBACK' disponível."
+fi
+
+# Healthcheck rápido do robô (IA e API)
+echo "🔎 Executando healthcheck do sistema..."
+source venv/bin/activate
+python -c "from ia.llama_cpp_client import LlamaCppClient; client = LlamaCppClient(); r = client.analisar_dados_mercado({'rsi':50,'tendencia':'lateral','volatilidade':0.01,'preco_atual':100}); print('✅ IA respondendo:', r)" || { echo "❌ Falha no healthcheck da IA. Verifique logs e dependências."; exit 1; }
+python -c "from coletor import ColetorBybit; c = ColetorBybit(); p = c.obter_preco_atual('BTCUSDT'); print('✅ API Bybit respondendo:', p)" || { echo "❌ Falha no healthcheck da API Bybit. Verifique conectividade."; exit 1; }
+echo "✅ Healthcheck concluído com sucesso."
 
 # Executar robô completo com log
 python robo_completo.py 2>&1 | tee logs/robo_completo.log

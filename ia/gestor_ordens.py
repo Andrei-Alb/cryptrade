@@ -9,14 +9,15 @@ from loguru import logger
 import sqlite3
 
 class GestorOrdensIA:
-    def __init__(self, db_path: str = "dados/trading.db"):
+    def __init__(self, db_path: str = "dados/trading.db", parametros_ia: Optional[Dict[str, Any]] = None):
         """
         Inicializa gestor inteligente de ordens
-        
         Args:
             db_path: Caminho para banco de dados
+            parametros_ia: Parâmetros dinâmicos da IA (opcional)
         """
         self.db_path = db_path
+        self.parametros_ia = parametros_ia if parametros_ia is not None else {}
         self.ordens_ativas: Dict[str, Dict[str, Any]] = {}
         self.historico_aprendizado: List[Dict[str, Any]] = []
         self.carregar_ordens_abertas()
@@ -34,7 +35,7 @@ class GestorOrdensIA:
     
     def analisar_ordens_ativas(self, dados_mercado: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
-        Analisa ordens ativas e decide se deve sair
+        Analisa ordens ativas e decide se deve sair usando previsões da IA
         
         Args:
             dados_mercado: Dados atuais do mercado
@@ -53,6 +54,15 @@ class GestorOrdensIA:
             # Calcular métricas da ordem
             duracao = (datetime.now() - ordem['timestamp']).total_seconds()
             variacao_atual = self.calcular_variacao(ordem['preco_entrada'], preco_atual, ordem['tipo'])
+            
+            # --- ANÁLISE BASEADA EM PREVISÕES DA IA ---
+            decisao_previsao = self._analisar_com_previsoes(ordem, dados_mercado, variacao_atual)
+            if decisao_previsao:
+                decisao_previsao['ordem_id'] = ordem_id
+                decisao_previsao['ordem'] = ordem
+                decisoes_saida.append(decisao_previsao)
+                logger.info(f"🎯 Decisão baseada em previsões IA: {ordem_id} | {decisao_previsao['decisao']}")
+                continue
             
             # --- Trailing Stop Dinâmico ---
             if 'max_lucro' not in ordem:
@@ -200,18 +210,108 @@ class GestorOrdensIA:
                 logger.info(f"🔴 Fechamento por volume baixo: {ordem_id}")
                 continue
                 
-            # Análise técnica para saída
-            decisao_saida = self.analisar_saida_tecnica(ordem, dados_mercado, duracao, variacao_atual)
-            
-            if decisao_saida['decisao'] in ['sair_lucro', 'sair_perda', 'sair_timeout']:
-                decisao_saida['ordem_id'] = ordem_id
-                decisao_saida['ordem'] = ordem
-                decisoes_saida.append(decisao_saida)
-                
-                logger.info(f"🎯 Decisão de saída: {decisao_saida['decisao']} | "
-                           f"Ordem: {ordem_id} | Razão: {decisao_saida['razao']}")
-        
         return decisoes_saida
+    
+    def _get_tempo_expiracao_ordem(self, ordem: Dict[str, Any]) -> float:
+        """Obtém o tempo de expiração dinâmico da ordem, priorizando o valor salvo na ordem, depois parâmetros globais, depois fallback."""
+        # 1. Valor salvo na ordem (preferencial)
+        if 'tempo_expiracao' in ordem:
+            return float(ordem['tempo_expiracao'])
+        if 'tempo_estagnacao' in ordem:
+            return float(ordem['tempo_estagnacao'])
+        # 2. Parâmetro global da IA (se existir)
+        if hasattr(self, 'parametros_ia') and isinstance(self.parametros_ia, dict):
+            return float(self.parametros_ia.get('tempo_estagnacao', 300))
+        # 3. Fallback permissivo
+        return 300.0
+
+    def _analisar_com_previsoes(self, ordem: Dict[str, Any], dados_mercado: Dict[str, Any], variacao_atual: float) -> Optional[Dict[str, Any]]:
+        """Analisa ordem usando previsões da IA"""
+        try:
+            previsoes = ordem.get('previsoes_ia', {})
+            if not previsoes:
+                return None
+            
+            preco_atual = dados_mercado['preco_atual']
+            preco_entrada = ordem['preco_entrada']
+            
+            # Verificar se target foi atingido
+            target = previsoes.get('target')
+            if target:
+                if ordem['tipo'] == 'comprar' and preco_atual >= target:
+                    return {
+                        'decisao': 'sair_lucro',
+                        'razao': f'Target da IA atingido: {target}',
+                        'lucro_percentual': variacao_atual,
+                        'tipo_saida': 'target_ia'
+                    }
+                elif ordem['tipo'] == 'vender' and preco_atual <= target:
+                    return {
+                        'decisao': 'sair_lucro',
+                        'razao': f'Target da IA atingido: {target}',
+                        'lucro_percentual': variacao_atual,
+                        'tipo_saida': 'target_ia'
+                    }
+            
+            # Verificar se stop loss foi atingido
+            stop_loss = previsoes.get('stop_loss')
+            if stop_loss:
+                if ordem['tipo'] == 'comprar' and preco_atual <= stop_loss:
+                    return {
+                        'decisao': 'sair_perda',
+                        'razao': f'Stop loss da IA atingido: {stop_loss}',
+                        'lucro_percentual': variacao_atual,
+                        'tipo_saida': 'stop_ia'
+                    }
+                elif ordem['tipo'] == 'vender' and preco_atual >= stop_loss:
+                    return {
+                        'decisao': 'sair_perda',
+                        'razao': f'Stop loss da IA atingido: {stop_loss}',
+                        'lucro_percentual': variacao_atual,
+                        'tipo_saida': 'stop_ia'
+                    }
+            
+            # Verificar cenários da IA
+            cenarios = previsoes.get('cenarios', {})
+            
+            # Cenário de saída por lucro
+            if cenarios.get('sair_lucro'):
+                # Verificar se condições para saída por lucro foram atendidas
+                if variacao_atual >= 1.5:  # Lucro mínimo de 1.5%
+                    return {
+                        'decisao': 'sair_lucro',
+                        'razao': f'Cenário IA: {cenarios["sair_lucro"]}',
+                        'lucro_percentual': variacao_atual,
+                        'tipo_saida': 'cenario_ia'
+                    }
+            
+            # Cenário de saída por perda
+            if cenarios.get('sair_perda'):
+                # Verificar se condições para saída por perda foram atendidas
+                if variacao_atual <= -1.0:  # Perda mínima de 1%
+                    return {
+                        'decisao': 'sair_perda',
+                        'razao': f'Cenário IA: {cenarios["sair_perda"]}',
+                        'lucro_percentual': variacao_atual,
+                        'tipo_saida': 'cenario_ia'
+                    }
+            
+            # Verificar timeout dinâmico
+            duracao = (datetime.now() - ordem['timestamp']).total_seconds()
+            tempo_expiracao = self._get_tempo_expiracao_ordem(ordem)
+            if duracao > tempo_expiracao:
+                return {
+                    'decisao': 'sair_timeout',
+                    'razao': f'Timeout: {duracao:.1f}s > {tempo_expiracao:.0f}s',
+                    'lucro_percentual': variacao_atual,
+                    'tipo_saida': 'timeout'
+                }
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Erro ao analisar com previsões: {e}")
+            return None
     
     def analisar_saida_tecnica(self, ordem: Dict[str, Any], dados_mercado: Dict[str, Any], 
                               duracao: float, variacao_atual: float) -> Dict[str, Any]:
@@ -262,11 +362,12 @@ class GestorOrdensIA:
                     'tipo_saida': 'stop'
                 }
         
-        # 2. Análise de timeout
-        if duracao > 300:  # 5 minutos
+        # 2. Análise de timeout dinâmico
+        tempo_expiracao = self._get_tempo_expiracao_ordem(ordem)
+        if duracao > tempo_expiracao:
             return {
                 'decisao': 'sair_timeout',
-                'razao': f'Timeout: {duracao:.1f}s > 300s',
+                'razao': f'Timeout: {duracao:.1f}s > {tempo_expiracao:.0f}s',
                 'lucro_percentual': variacao_atual,
                 'tipo_saida': 'timeout'
             }

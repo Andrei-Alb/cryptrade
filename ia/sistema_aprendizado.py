@@ -1,6 +1,6 @@
 """
-Sistema de Aprendizado Inteligente para IA de Trading
-Analisa resultados e ajusta parâmetros automaticamente
+Sistema de Aprendizado Inteligente para IA de Trading - VERSÃO AUTÔNOMA
+Analisa resultados e permite que a IA ajuste seus próprios parâmetros
 """
 
 import json
@@ -13,23 +13,30 @@ import statistics
 class SistemaAprendizado:
     def __init__(self, db_path: str = "dados/trading.db"):
         """
-        Inicializa sistema de aprendizado
+        Inicializa sistema de aprendizado AUTÔNOMO
         
         Args:
             db_path: Caminho para banco de dados
         """
         self.db_path = db_path
+        
+        # PARÂMETROS INICIAIS (TOTALMENTE AUTÔNOMOS)
         self.parametros_atuais = {
-            'threshold_confianca': 0.25,
-            'threshold_confianca_alta': 0.6,
-            'tempo_estagnacao': 180,  # 3 minutos
+            'threshold_confianca': 0.40, # Muito baixo para permitir aprendizado
+            'threshold_confianca_alta': 0.60, # Muito baixo para permitir aprendizado
+            'tempo_estagnacao': 120, # 2 minutos inicial (IA ajusta dinamicamente)
             'stop_loss_percentual': 0.15,
             'take_profit_percentual': 0.25,
-            'max_ordens_consecutivas': 3,
-            'balanceamento_compra_venda': True
+            'max_ordens_consecutivas': 10, # Muito alto para permitir aprendizado
+            'balanceamento_compra_venda': True,
+            'aprendizado_autonomo': True,  # Habilita ajustes automáticos
+            'tempo_expiracao_dinamico': True, # NOVO: IA controla tempo de expiração
+            'ajuste_frequente': True  # NOVO: Ajustes mais frequentes
         }
         self.historico_ajustes: List[Dict[str, Any]] = []
         
+        logger.info("🧠 Sistema de Aprendizado AUTÔNOMO inicializado")
+    
     def analisar_desempenho_recente(self, dias: int = 7) -> Dict[str, Any]:
         """
         Analisa desempenho das últimas ordens
@@ -381,78 +388,320 @@ class SistemaAprendizado:
     
     def registrar_aprendizado_ordem(self, ordem: Dict[str, Any], resultado: str, 
                                   lucro_percentual: float, dados_mercado: Dict[str, Any]) -> bool:
-        """Registra aprendizado detalhado da ordem, sempre, independentemente do nível de confiança"""
+        """
+        Registra resultado de ordem e ajusta parâmetros automaticamente
+        
+        Args:
+            ordem: Dados da ordem
+            resultado: 'win', 'loss' ou 'timeout'
+            lucro_percentual: Lucro/prejuízo percentual
+            dados_mercado: Dados do mercado no momento da ordem
+            
+        Returns:
+            true se registrado com sucesso
+        """
+        try:
+            # Registrar resultado básico
+            self._registrar_resultado_basico(ordem, resultado, lucro_percentual)
+            
+            # Registrar análise de previsões vs resultado
+            self._registrar_previsoes_vs_resultado(ordem, resultado, lucro_percentual, dados_mercado)
+            
+            # APRENDIZADO AUTÔNOMO - Ajustar parâmetros automaticamente
+            if self.parametros_atuais['aprendizado_autonomo']:
+                self._ajustar_parametros_autonomo(ordem, resultado, lucro_percentual)
+            
+            logger.info(f"🧠 Aprendizado registrado: resultado={resultado} (lucro_percentual={lucro_percentual:.2f}%)")
+            return True          
+        except Exception as e:
+            logger.error(f"❌ Erro ao registrar aprendizado: {e}")
+            return False
+    
+    def _ajustar_parametros_autonomo(self, ordem: Dict[str, Any], resultado: str, lucro_percentual: float):
+        """Ajusta parâmetros automaticamente baseado no resultado (APRENDIZADO AUTÔNOMO)"""
+        try:
+            confianca_ia = ordem.get('confianca_ia', 0.5)      
+            # Analisar últimas 20 ordens para contexto
+            contexto = self._obter_contexto_recente(20)
+            
+            if resultado == 'win':
+                # WIN - Ajustar para ser menos conservador
+                if confianca_ia < 0.6:
+                    # IA acertou com confiança baixa - pode ser menos conservadora
+                    novo_threshold = max(0.35, self.parametros_atuais['threshold_confianca'] - 0.05)
+                    self.parametros_atuais['threshold_confianca'] = novo_threshold
+                    logger.info(f"🧠 WIN com confiança baixa - Reduzindo threshold para {novo_threshold:.2f}")
+                
+                # Se sequência de wins, ser ainda menos conservador
+                if contexto['sequencia_wins'] >= 3:
+                    novo_threshold = max(0.30, self.parametros_atuais['threshold_confianca'] - 0.10)
+                    self.parametros_atuais['threshold_confianca'] = novo_threshold
+                    logger.info(f"🧠 Sequência de {contexto['sequencia_wins']} wins - Reduzindo threshold para {novo_threshold:.2f}")
+            
+            elif resultado == 'loss':
+                # LOSS - Ajustar para ser mais conservador
+                if confianca_ia > 0.7:
+                    # IA errou com confiança alta - precisa ser mais conservadora
+                    novo_threshold = min(0.95, self.parametros_atuais['threshold_confianca'] + 0.10)
+                    self.parametros_atuais['threshold_confianca'] = novo_threshold
+                    logger.info(f"🧠 LOSS com confiança alta - Aumentando threshold para {novo_threshold:.2f}")
+                
+                # Se sequência de losses, ser ainda mais conservador
+                if contexto['sequencia_losses'] >= 3:
+                    novo_threshold = min(0.95, self.parametros_atuais['threshold_confianca'] + 0.15)
+                    self.parametros_atuais['threshold_confianca'] = novo_threshold
+                    logger.info(f"🧠 Sequência de {contexto['sequencia_losses']} losses - Aumentando threshold para {novo_threshold:.2f}")
+            
+            # Ajustar threshold de confiança alta baseado no win rate
+            if contexto['win_rate'] < 0.3:  # Win rate baixo
+                novo_threshold_alta = min(0.95, self.parametros_atuais['threshold_confianca_alta'] + 0.10)
+                self.parametros_atuais['threshold_confianca_alta'] = novo_threshold_alta
+                logger.info(f"🧠 Win rate baixo ({contexto['win_rate']:.1%}) - Aumentando threshold alta para {novo_threshold_alta:.2f}")
+            
+            elif contexto['win_rate'] > 0.7:  # Win rate alto
+                novo_threshold_alta = max(0.50, self.parametros_atuais['threshold_confianca_alta'] - 0.10)
+                self.parametros_atuais['threshold_confianca_alta'] = novo_threshold_alta
+                logger.info(f"🧠 Win rate alto ({contexto['win_rate']:.1%}) - Reduzindo threshold alta para {novo_threshold_alta:.2f}")
+            
+            # Registrar ajuste
+            self._registrar_ajuste_autonomo(ordem, resultado, contexto)
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao ajustar parâmetros autônomos: {e}")
+    
+    def _obter_contexto_recente(self, num_ordens: int = 20) -> Dict[str, Any]:
+        """Obtém contexto das últimas ordens para ajuste autônomo"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT resultado, confianca_ia, timestamp_fechamento
+                FROM ordens_dinamicas 
+                WHERE status = 'fechada'
+                ORDER BY timestamp_fechamento DESC 
+                LIMIT ?
+            """, (num_ordens,))
+            
+            resultados = cursor.fetchall()
+            conn.close()
+            
+            if not resultados:
+                return {
+                    'win_rate': 0,
+                    'sequencia_wins': 0,
+                    'sequencia_losses': 0,
+                    'confianca_media': 0.5,
+                    'total_ordens': 0
+                }
+            
+            # Calcular win rate
+            wins = sum(1 for r in resultados if r[0] == 'win')
+            win_rate = wins / len(resultados)
+            
+            # Calcular sequências
+            sequencia_wins = 0        
+            sequencia_losses = 0
+            
+            for resultado, _, _ in resultados:
+                if resultado == 'win':
+                    sequencia_wins += 1
+                    sequencia_losses = 0             
+                else:
+                    sequencia_losses += 1
+                    sequencia_wins = 0            
+                break
+            
+            # Confiança média
+            confiancas = [r[1] for r in resultados if r[1] is not None]
+            confianca_media = statistics.mean(confiancas) if confiancas else 0.5      
+            return {
+                'win_rate': win_rate,
+                'sequencia_wins': sequencia_wins,
+                'sequencia_losses': sequencia_losses,
+                'confianca_media': confianca_media,
+                'total_ordens': len(resultados)
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao obter contexto: {e}")
+            return {
+                'win_rate': 0,
+                'sequencia_wins': 0,
+                'sequencia_losses': 0,
+                'confianca_media': 0.5          
+            }
+    
+    def _registrar_ajuste_autonomo(self, ordem: Dict[str, Any], resultado: str, contexto: Dict[str, Any]):
+        """Registra ajuste autônomo realizado"""
+        try:
+            ajuste = {
+                'timestamp': datetime.now(),
+                'order_id': ordem.get('order_id', ''),
+                'resultado': resultado,
+                'confianca_ia': ordem.get('confianca_ia', 0),
+                'contexto': contexto,
+                'parametros_antes': self.parametros_atuais.copy(),
+                'motivo': f"Ajuste autônomo baseado em {resultado}"
+            }
+            
+            self.historico_ajustes.append(ajuste)
+            
+            # Manter apenas últimos 100 ajustes
+            if len(self.historico_ajustes) > 100:
+                self.historico_ajustes = self.historico_ajustes[-100:]
+            
+            logger.info(f"🧠 Ajuste autônomo registrado: {ajuste['motivo']}")
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao registrar ajuste autônomo: {e}")
+    
+    def _registrar_resultado_basico(self, ordem: Dict[str, Any], resultado: str, lucro_percentual: float):
+        """Registra o resultado básico de uma ordem fechada"""
         try:
             conn = sqlite3.connect(self.db_path)
             c = conn.cursor()
             
-            # Verificar se a tabela existe e tem a estrutura correta
-            c.execute("PRAGMA table_info(aprendizado_detalhado)")
-            colunas = [col[1] for col in c.fetchall()]
-            
-            # Se a tabela não existe, criar com a estrutura completa
-            if not colunas:
-                c.execute("""
-                    CREATE TABLE aprendizado_detalhado (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        timestamp DATETIME NOT NULL,
-                        ordem_id TEXT,
-                        confianca_ia DECIMAL(5,2),
-                        resultado TEXT,
-                        lucro_percentual DECIMAL(5,2),
-                        duracao_segundos INTEGER,
-                        tipo_ordem TEXT,
-                        razao_fechamento TEXT,
-                        dados_mercado TEXT,
-                        parametros_usados TEXT,
-                        acerto BOOLEAN,
-                        aprendizado TEXT
-                    )
-                """)
-                logger.info("Tabela aprendizado_detalhado criada com estrutura completa")
-            
-            # Determinar se foi acerto
-            acerto = self._determinar_acerto(ordem, resultado, lucro_percentual)
-            
-            # Gerar aprendizado específico
-            aprendizado_especifico = self._gerar_aprendizado_especifico(ordem, resultado, lucro_percentual, dados_mercado)
-            
-            # Preparar dados para inserção
-            duracao = ordem.get('duracao_segundos', 0)
-            
-            # Inserir registro usando apenas as colunas que existem
-            c.execute("""
-                INSERT INTO aprendizado_detalhado 
-                (timestamp, ordem_id, confianca_ia, resultado, lucro_percentual, 
-                 duracao_segundos, tipo_ordem, razao_fechamento, dados_mercado, 
-                 parametros_usados, acerto, aprendizado)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                datetime.now(),
-                ordem.get('ordem_id', ''),
-                ordem.get('confianca_ia', 0),
+            c.execute('''
+            INSERT INTO ordens_dinamicas (
+                order_id, confianca_ia, resultado, lucro_percentual,
+                duracao_segundos, razao_fechamento, dados_mercado, timestamp_fechamento
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                ordem.get('order_id', ''),
+                ordem.get('confianca_ia', 0.0),
                 resultado,
                 lucro_percentual,
-                duracao,
-                ordem.get('tipo', ''),
+                ordem.get('duracao_segundos', 0),
                 ordem.get('razao_fechamento', ''),
-                json.dumps(dados_mercado),
-                json.dumps(self.parametros_atuais),
-                acerto,
-                json.dumps(aprendizado_especifico)
+                json.dumps(ordem.get('dados_mercado', {})),
+                datetime.now()
             ))
             
             conn.commit()
             conn.close()
             
-            logger.info(f"📚 Aprendizado detalhado registrado: {ordem.get('tipo', '')} | "
-                       f"Confiança: {ordem.get('confianca_ia', 0):.2f} | "
-                       f"Resultado: {resultado} | Acerto: {acerto}")
+            logger.info(f"📚 Resultado básico registrado para ordem {ordem.get('order_id', '')}")
             
-            return True
         except Exception as e:
-            logger.error(f"Erro ao registrar aprendizado detalhado: {e}")
-            return False
+            logger.error(f"❌ Erro ao registrar resultado básico: {e}")
+    
+    def _registrar_previsoes_vs_resultado(self, ordem: Dict[str, Any], resultado: str, 
+                                        lucro_percentual: float, dados_mercado: Dict[str, Any]) -> None:
+        """Registra análise de previsões vs resultado real"""
+        try:
+            previsoes = ordem.get('previsoes_ia', {})
+            if not previsoes:
+                return
+            
+            preco_fechamento = dados_mercado.get('preco_atual', 0)
+            preco_entrada = ordem.get('preco_entrada', 0)
+            
+            if preco_fechamento == 0 or preco_entrada == 0:
+                return
+            
+            # Analisar precisão das previsões
+            analise_precisao = {
+                'order_id': ordem.get('order_id', ''),
+                'target_previsto': previsoes.get('target'),
+                'stop_previsto': previsoes.get('stop_loss'),
+                'preco_entrada': preco_entrada,
+                'preco_fechamento': preco_fechamento,
+                'resultado_real': resultado,
+                'lucro_real': lucro_percentual,
+                'precisao_target': None,
+                'precisao_stop': None,
+                'cenarios_acertados': [],
+                'timestamp': datetime.now()
+            }
+            
+            # Verificar precisão do target
+            target = previsoes.get('target')
+            if target:
+                if ordem.get('tipo_ordem') == 'compra':
+                    if preco_fechamento >= target:
+                        analise_precisao['precisao_target'] = 'acerto'
+                    else:
+                        analise_precisao['precisao_target'] = 'erro'
+                else:  # venda
+                    if preco_fechamento <= target:
+                        analise_precisao['precisao_target'] = 'acerto'
+                    else:
+                        analise_precisao['precisao_target'] = 'erro'
+            
+            # Verificar precisão do stop loss
+            stop_loss = previsoes.get('stop_loss')
+            if stop_loss:
+                if ordem.get('tipo_ordem') == 'compra':
+                    if preco_fechamento <= stop_loss:
+                        analise_precisao['precisao_stop'] = 'acerto'
+                    else:
+                        analise_precisao['precisao_stop'] = 'erro'
+                else:  # venda
+                    if preco_fechamento >= stop_loss:
+                        analise_precisao['precisao_stop'] = 'acerto'
+                    else:
+                        analise_precisao['precisao_stop'] = 'erro'
+            
+            # Verificar cenários
+            cenarios = previsoes.get('cenarios', {})
+            if cenarios:
+                if resultado == 'win' and cenarios.get('sair_lucro'):
+                    analise_precisao['cenarios_acertados'].append('sair_lucro')
+                elif resultado == 'loss' and cenarios.get('sair_perda'):
+                    analise_precisao['cenarios_acertados'].append('sair_perda')
+                elif lucro_percentual > -0.5 and cenarios.get('manter'):
+                    analise_precisao['cenarios_acertados'].append('manter')
+            
+            # Salvar análise no banco
+            conn = sqlite3.connect(self.db_path)
+            c = conn.cursor()
+            
+            # Criar tabela se não existir
+            c.execute('''
+            CREATE TABLE IF NOT EXISTS analise_previsoes_ia (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_id TEXT,
+                target_previsto REAL,
+                stop_previsto REAL,
+                preco_entrada REAL,
+                preco_fechamento REAL,
+                resultado_real TEXT,
+                lucro_real REAL,
+                precisao_target TEXT,
+                precisao_stop TEXT,
+                cenarios_acertados TEXT,
+                timestamp DATETIME
+            )
+            ''')
+            
+            c.execute('''
+            INSERT INTO analise_previsoes_ia (
+                order_id, target_previsto, stop_previsto, preco_entrada, preco_fechamento,
+                resultado_real, lucro_real, precisao_target, precisao_stop, 
+                cenarios_acertados, timestamp
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                analise_precisao['order_id'],
+                analise_precisao['target_previsto'],
+                analise_precisao['stop_previsto'],
+                analise_precisao['preco_entrada'],
+                analise_precisao['preco_fechamento'],
+                analise_precisao['resultado_real'],
+                analise_precisao['lucro_real'],
+                analise_precisao['precisao_target'],
+                analise_precisao['precisao_stop'],
+                json.dumps(analise_precisao['cenarios_acertados']),
+                analise_precisao['timestamp']
+            ))
+            
+            conn.commit()
+            conn.close()
+            
+            logger.info(f"🎯 Análise de previsões registrada: Target {analise_precisao['precisao_target']}, Stop {analise_precisao['precisao_stop']}")
+            
+        except Exception as e:
+            logger.error(f"Erro ao registrar análise de previsões: {e}")
     
     def _determinar_acerto(self, ordem: Dict[str, Any], resultado: str, lucro_percentual: float) -> bool:
         """Determina se a ordem foi um acerto"""
@@ -514,11 +763,11 @@ class SistemaAprendizado:
             c = conn.cursor()
             
             # Total de registros de aprendizado
-            c.execute('SELECT COUNT(*) FROM aprendizado_detalhado')
+            c.execute('SELECT COUNT(*) FROM aprendizado_ia')
             total_registros = c.fetchone()[0]
             
             # Taxa de acerto geral
-            c.execute('SELECT AVG(CASE WHEN acerto = 1 THEN 1.0 ELSE 0.0 END) FROM aprendizado_detalhado')
+            c.execute('SELECT AVG(CASE WHEN resultado = \'win\' THEN 1.0 ELSE 0.0 END) FROM aprendizado_ia')
             taxa_acerto_geral = c.fetchone()[0] or 0.0
             
             # Ajustes realizados
@@ -540,3 +789,103 @@ class SistemaAprendizado:
         except Exception as e:
             logger.error(f"Erro ao obter estatísticas de aprendizado: {e}")
             return {} 
+    
+    def obter_estatisticas_previsoes(self, dias: int = 7) -> Dict[str, Any]:
+        """Obtém estatísticas de precisão das previsões da IA"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            c = conn.cursor()
+            
+            # Verificar se tabela existe
+            c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='analise_previsoes_ia'")
+            if not c.fetchone():
+                conn.close()
+                return {'mensagem': 'Nenhuma análise de previsões encontrada'}
+            
+            # Data limite
+            data_limite = datetime.now() - timedelta(days=dias)
+            
+            # Buscar análises recentes
+            c.execute('''
+            SELECT precisao_target, precisao_stop, resultado_real, lucro_real, cenarios_acertados
+            FROM analise_previsoes_ia 
+            WHERE timestamp > ?
+            ''', (data_limite,))
+            
+            analises = c.fetchall()
+            conn.close()
+            
+            if not analises:
+                return {'total_analises': 0, 'mensagem': 'Nenhuma análise recente encontrada'}
+            
+            # Calcular estatísticas
+            total_analises = len(analises)
+            
+            # Precisão do target
+            targets = [a[0] for a in analises if a[0] is not None]
+            precisao_target = (targets.count('acerto') / len(targets) * 100) if targets else 0
+            
+            # Precisão do stop loss
+            stops = [a[1] for a in analises if a[1] is not None]
+            precisao_stop = (stops.count('acerto') / len(stops) * 100) if stops else 0
+            
+            # Resultados gerais
+            wins = sum(1 for a in analises if a[2] == 'win')
+            win_rate = (wins / total_analises) * 100
+            
+            # Lucro médio
+            lucros = [a[3] for a in analises if a[3] is not None]
+            lucro_medio = statistics.mean(lucros) if lucros else 0
+            
+            # Cenários acertados
+            cenarios_totais = 0
+            cenarios_acertos = 0
+            for analise in analises:
+                if analise[4]:
+                    cenarios = json.loads(analise[4])
+                    cenarios_totais += len(cenarios)
+                    cenarios_acertos += len(cenarios)
+            
+            taxa_cenarios = (cenarios_acertos / cenarios_totais * 100) if cenarios_totais > 0 else 0
+            
+            return {
+                'total_analises': total_analises,
+                'precisao_target': precisao_target,
+                'precisao_stop': precisao_stop,
+                'win_rate': win_rate,
+                'lucro_medio': lucro_medio,
+                'taxa_cenarios_acertados': taxa_cenarios,
+                'recomendacoes': self._gerar_recomendacoes_previsoes(analises)
+            }
+            
+        except Exception as e:
+            logger.error(f"Erro ao obter estatísticas de previsões: {e}")
+            return {'erro': str(e)}
+    
+    def _gerar_recomendacoes_previsoes(self, analises: List[tuple]) -> List[str]:
+        """Gera recomendações baseadas na precisão das previsões"""
+        recomendacoes = []
+        
+        # Analisar precisão do target
+        targets = [a[0] for a in analises if a[0] is not None]
+        if targets:
+            precisao_target = targets.count('acerto') / len(targets)
+            if precisao_target < 0.3:
+                recomendacoes.append("Precisão do target muito baixa - considerar ajustar prompts da IA")
+            elif precisao_target > 0.7:
+                recomendacoes.append("Precisão do target alta - manter estratégia atual")
+        
+        # Analisar precisão do stop loss
+        stops = [a[1] for a in analises if a[1] is not None]
+        if stops:
+            precisao_stop = stops.count('acerto') / len(stops)
+            if precisao_stop < 0.5:
+                recomendacoes.append("Stop loss pouco preciso - revisar lógica de proteção")
+        
+        # Analisar resultados gerais
+        wins = sum(1 for a in analises if a[2] == 'win')
+        win_rate = wins / len(analises)
+        if win_rate < 0.3:
+            recomendacoes.append("Win rate baixo - revisar critérios de entrada")
+        
+        return recomendacoes 

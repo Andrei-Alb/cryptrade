@@ -1,416 +1,319 @@
 """
-Decisor de IA para Trading
-Processa decisões da IA e aplica filtros de segurança
+Decisor de IA para Trading - VERSÃO OTIMIZADA
+Processa decisões da IA com cache e métricas de performance
 """
 
-from typing import Dict, Any, Optional, List
-from datetime import datetime, time
 import logging
+import yaml
+from typing import Dict, Any, Optional
+from .llama_cpp_client import LlamaCppClient
+from .metricas_ia import MetricasIA
+from .filtros_qualidade import FiltrosQualidade
+import time
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-class DecisorIA:
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+class Decisor:
+    def __init__(self, config_path: str = "config.yaml", **kwargs):
         """
-        Inicializa decisor de IA
-        
-        Args:
-            config: Configurações do decisor
+        Inicializa o sistema de decisão da IA otimizado
+        Aceita argumentos extras para compatibilidade (ignorados se não usados)
         """
-        self.config = self._mesclar_config(config)
-        self.decisoes_historico: List[Dict[str, Any]] = []
+        # Verificar se config_path é um dicionário ou string
+        if isinstance(config_path, dict):
+            self.config = config_path
+        else:
+            self.config = self._carregar_config(config_path)
         
-    def _mesclar_config(self, config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        """Mescla configuração fornecida com padrão"""
-        config_padrao = self._config_padrao()
-        if config:
-            config_padrao.update(config)
-        return config_padrao
+        # Inicializar cliente IA otimizado
+        modelo_principal = self.config.get('ia', {}).get('modelo_principal', 'phi3:mini')
+        timeout_ia = self.config.get('ia', {}).get('timeout_inferencia', 45)
+        cache_ttl = self.config.get('ia', {}).get('cache_ttl', 30)
+        self.cliente_ia = LlamaCppClient(modelo_principal, timeout=timeout_ia, cache_ttl=cache_ttl)
         
-    def _config_padrao(self) -> Dict[str, Any]:
-        """Configurações padrão do decisor"""
+        # Sistema de métricas
+        self.metricas = MetricasIA()
+        
+        # Sistema de filtros de qualidade
+        self.filtros = FiltrosQualidade()
+        
+        logger.info(f"[DECISOR] Sistema otimizado inicializado com modelo: {modelo_principal}")
+    
+    def _carregar_config(self, config_path: str) -> Dict[str, Any]:
+        """Carrega configuração do arquivo YAML"""
+        try:
+            with open(config_path, 'r', encoding='utf-8') as file:
+                return yaml.safe_load(file)
+        except Exception as e:
+            logger.error(f"[DECISOR] Erro ao carregar config: {e}")
+            return {}
+    
+    def _preparar_dados_simples(self, dados_mercado: Dict[str, Any]) -> Dict[str, Any]:
+        """Prepara dados de forma simples para IA"""
         return {
-            'confianca_minima': 0.8,  # Mais seletivo: exige sinais muito fortes
-            'max_ordens_dia': 10,
-            'stop_loss_padrao': 100,
-            'take_profit_padrao': 200,
-            'horario_inicio': '09:00',
-            'horario_fim': '17:00',
-            'dias_semana': [0, 1, 2, 3, 4],  # Segunda a Sexta
-            'volatilidade_maxima': 0.05,  # 5%
-            'volume_minimo': 0,
-            'rsi_sobrecompra': 70,
-            'rsi_sobrevenda': 30,
-            'tendencia_minima_periodos': 20
+            'rsi': dados_mercado.get('rsi', 50.0),
+            'tendencia': dados_mercado.get('tendencia', 'lateral'),
+            'volatilidade': dados_mercado.get('volatilidade', 0.02),
+            'preco_atual': dados_mercado.get('preco_atual', 0.0),
+            'volume_24h': dados_mercado.get('volume_24h', 0),
+            'volume_1h': dados_mercado.get('volume_1h', 0),
+            'symbol': dados_mercado.get('symbol', 'BTCUSDT')
         }
     
-    def processar_decisao_ia(self, decisao_ia: Dict[str, Any], dados_mercado: Dict[str, Any], ordem_aberta: bool = False) -> Dict[str, Any]:
+    def analisar_mercado(self, dados_mercado: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
-        Processa decisão da IA e aplica filtros de segurança
+        Analisa dados de mercado e retorna decisão da IA com métricas
         """
+        inicio_analise = time.time()
+        
         try:
-            # Permitir apenas uma entrada por vez
-            if ordem_aberta:
-                return {
-                    'decisao': 'aguardar',
-                    'confianca': decisao_ia.get('confianca', 0.0),
-                    'razao': 'Já existe ordem aberta, aguardando fechamento.',
-                    'parametros': decisao_ia.get('parametros', {})
+            # Preparar dados de forma simples
+            dados_preparados = self._preparar_dados_simples(dados_mercado)
+            
+            if not dados_preparados:
+                logger.error("[DECISOR] Falha ao preparar dados")
+                self.metricas.registrar_inferencia(0, erro=True)
+                return None
+            
+            # Verificar cache primeiro
+            cache_key = self.cliente_ia._gerar_cache_key(dados_preparados)
+            decisao_cache = self.cliente_ia._verificar_cache(cache_key)
+            
+            if decisao_cache:
+                tempo_total = time.time() - inicio_analise
+                self.metricas.registrar_inferencia(tempo_total, cache_hit=True)
+                logger.info(f"[DECISOR] Decisão do cache em {tempo_total:.3f}s")
+                return decisao_cache
+            
+            # Analisar com IA
+            inicio_ia = time.time()
+            decisao_ia = self.cliente_ia.analisar_dados_mercado(dados_preparados)
+            tempo_ia = time.time() - inicio_ia
+            
+            if decisao_ia:
+                # Registrar métricas
+                tempo_total = time.time() - inicio_analise
+                self.metricas.registrar_inferencia(tempo_total, cache_hit=False)
+                
+                logger.info(f"[DECISOR] Decisão IA em {tempo_ia:.3f}s (total: {tempo_total:.3f}s)")
+                return decisao_ia
+            else:
+                # Erro inesperado (não timeout, pois timeout agora usa fallback)
+                tempo_total = time.time() - inicio_analise
+                self.metricas.registrar_inferencia(tempo_total, erro=True)
+                logger.error(f"[DECISOR] Erro inesperado na análise IA após {tempo_total:.3f}s")
+                return None
+                
+        except Exception as e:
+            tempo_total = time.time() - inicio_analise
+            self.metricas.registrar_inferencia(tempo_total, erro=True)
+            logger.error(f"[DECISOR] Erro na análise: {e}")
+            return None
+    
+    def processar_decisao_ia(self, decisao: Dict[str, Any], dados_mercado: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Processa decisão da IA e retorna decisão final com filtros de qualidade e previsões"""
+        try:
+            # Validar decisão
+            if not decisao or 'decisao' not in decisao:
+                logger.warning("[DECISOR] Decisão inválida recebida")
+                return None
+            
+            # Extrair previsões da IA
+            previsoes = self._extrair_previsoes(decisao)
+            
+            # Normalizar decisão
+            decisao_normalizada = {
+                'decisao': decisao.get('decisao', 'aguardar'),
+                'confianca': float(decisao.get('confianca', 0.5)),
+                'razao': decisao.get('razao', 'Análise técnica'),
+                'previsoes': previsoes,  # Incluir previsões
+                'parametros': {
+                    'rsi': dados_mercado.get('rsi', 50.0),
+                    'volatilidade': dados_mercado.get('volatilidade', 0.02),
+                    'tendencia': dados_mercado.get('tendencia', 'lateral'),
+                    'preco_atual': dados_mercado.get('preco_atual', 0.0),
+                    'stop_loss': previsoes.get('stop_loss', -2.0),
+                    'take_profit': previsoes.get('take_profit', 3.0),
+                    'quantidade': 1
                 }
-            # Validar decisão da IA
-            if not self._validar_decisao_ia(decisao_ia):
-                logger.warning("Decisão da IA inválida, usando fallback")
-                return self._decisao_fallback()
-            # --- Penalização de confiança e ajuste em drawdown ---
-            try:
-                import sqlite3
-                conn = sqlite3.connect('robo_trading/dados/trading.db')
-                c = conn.cursor()
-                c.execute("SELECT resultado FROM ordens_simuladas WHERE status = 'fechada' ORDER BY timestamp_fechamento DESC LIMIT 5;")
-                ultimos_resultados = [row[0] for row in c.fetchall()]
-                conn.close()
-            except sqlite3.Error:
-                ultimos_resultados = []
-            sequencia_losses = 0
-            for r in ultimos_resultados:
-                if r == 'loss':
-                    sequencia_losses += 1
+            }
+            
+            # APLICAR FILTROS DE QUALIDADE
+            if decisao_normalizada['decisao'] in ['comprar', 'vender']:
+                aprovado, motivo = self.filtros.verificar_qualidade_entrada(decisao_normalizada, dados_mercado)
+                
+                if not aprovado:
+                    logger.warning(f"[DECISOR] Entrada rejeitada pelos filtros: {motivo}")
+                    return {
+                        'decisao': 'aguardar',
+                        'confianca': 0.0,
+                        'razao': f'Filtros de qualidade: {motivo}',
+                        'previsoes': previsoes,
+                        'parametros': decisao_normalizada['parametros']
+                    }
                 else:
-                    break
-            if sequencia_losses >= 3:
-                logger.info("IA em drawdown: %d losses seguidos. Exigindo sinais mais fortes.", sequencia_losses)
-                confianca_minima_drawdown = max(self.config['confianca_minima'], 0.85)
-                if decisao_ia['confianca'] < confianca_minima_drawdown:
-                    return {
-                        'decisao': 'aguardar',
-                        'confianca': decisao_ia['confianca'],
-                        'razao': f'Em drawdown ({sequencia_losses} losses), aguardando sinal fortíssimo',
-                        'parametros': decisao_ia.get('parametros', {})
-                    }
-                decisao_ia['razao'] += f' | Contexto: drawdown ({sequencia_losses} losses)'
-            # Após loss, só permitir nova entrada se confiança > 0.85
-            if ultimos_resultados and ultimos_resultados[0] == 'loss' and decisao_ia['confianca'] <= 0.85:
-                return {
-                    'decisao': 'aguardar',
-                    'confianca': decisao_ia['confianca'],
-                    'razao': 'Última ordem foi loss, aguardando sinal fortíssimo para nova entrada.',
-                    'parametros': decisao_ia.get('parametros', {})
-                }
+                    logger.info(f"[DECISOR] Entrada aprovada pelos filtros: {motivo}")
             
-            # Filtro de tendência: evitar operar contra a tendência
-            tendencia = dados_mercado.get('tendencia', 'lateral')
-            if decisao_ia['decisao'] == 'comprar' and tendencia == 'baixa':
-                logger.info("Evitando compra em tendência de baixa")
-                return {
-                    'decisao': 'aguardar',
-                    'confianca': decisao_ia['confianca'],
-                    'razao': 'Tendência de baixa detectada, aguardando',
-                    'parametros': decisao_ia.get('parametros', {})
-                }
-            if decisao_ia['decisao'] == 'vender' and tendencia == 'alta':
-                logger.info("Evitando venda em tendência de alta")
-                return {
-                    'decisao': 'aguardar',
-                    'confianca': decisao_ia['confianca'],
-                    'razao': 'Tendência de alta detectada, aguardando',
-                    'parametros': decisao_ia.get('parametros', {})
-                }
-            
-            # Filtro de exaustão de movimento: evitar comprar no topo ou vender no fundo
-            historico_precos = dados_mercado.get('historico_precos', [])
-            variacao = dados_mercado.get('variacao', 0.0)
-            rsi = dados_mercado.get('rsi', 50.0)
-            # Evitar comprar após 3+ candles de alta ou variação > 0.5%
-            if decisao_ia['decisao'] == 'comprar':
-                if len(historico_precos) >= 4 and all(historico_precos[-i] < historico_precos[-i+1] for i in range(1, 4)):
-                    logger.info("Evitando compra após sequência de altas (excesso de otimismo)")
-                    return {
-                        'decisao': 'aguardar',
-                        'confianca': decisao_ia['confianca'],
-                        'razao': 'Exaustão de alta detectada, aguardando pullback',
-                        'parametros': decisao_ia.get('parametros', {})
-                    }
-                if variacao > 0.5:
-                    logger.info("Evitando compra após variação muito positiva")
-                    return {
-                        'decisao': 'aguardar',
-                        'confianca': decisao_ia['confianca'],
-                        'razao': 'Variação muito positiva, aguardando correção',
-                        'parametros': decisao_ia.get('parametros', {})
-                    }
-                if rsi > 70:
-                    logger.info("Evitando compra com RSI sobrecomprado")
-                    return {
-                        'decisao': 'aguardar',
-                        'confianca': decisao_ia['confianca'],
-                        'razao': 'RSI sobrecomprado, aguardando correção',
-                        'parametros': decisao_ia.get('parametros', {})
-                    }
-            # Evitar vender após 3+ candles de baixa ou variação < -0.5%
-            if decisao_ia['decisao'] == 'vender':
-                if len(historico_precos) >= 4 and all(historico_precos[-i] > historico_precos[-i+1] for i in range(1, 4)):
-                    logger.info("Evitando venda após sequência de baixas (excesso de pessimismo)")
-                    return {
-                        'decisao': 'aguardar',
-                        'confianca': decisao_ia['confianca'],
-                        'razao': 'Exaustão de baixa detectada, aguardando pullback',
-                        'parametros': decisao_ia.get('parametros', {})
-                    }
-                if variacao < -0.5:
-                    logger.info("Evitando venda após variação muito negativa")
-                    return {
-                        'decisao': 'aguardar',
-                        'confianca': decisao_ia['confianca'],
-                        'razao': 'Variação muito negativa, aguardando repique',
-                        'parametros': decisao_ia.get('parametros', {})
-                    }
-                if rsi < 30:
-                    logger.info("Evitando venda com RSI sobrevendido")
-                    return {
-                        'decisao': 'aguardar',
-                        'confianca': decisao_ia['confianca'],
-                        'razao': 'RSI sobrevendido, aguardando repique',
-                        'parametros': decisao_ia.get('parametros', {})
-                    }
-            
-            # Aplicar filtros de segurança
-            decisao_filtrada = self._aplicar_filtros_seguranca(decisao_ia, dados_mercado)
-            
-            # Verificar condições de mercado
-            if not self._verificar_condicoes_mercado(dados_mercado):
-                logger.info("Condições de mercado não favoráveis, aguardando")
-                return self._decisao_aguardar()
-            
-            # Verificar limites de operação
-            if not self._verificar_limites_operacao(decisao_filtrada):
-                logger.info("Limite de operações atingido, aguardando")
-                return self._decisao_aguardar()
-            
-            # Registrar decisão
-            self._registrar_decisao(decisao_filtrada)
-            
-            logger.info(f"Decisão final: {decisao_filtrada['decisao']} "
-                       f"(confiança: {decisao_filtrada['confianca']})")
-            
-            return decisao_filtrada
+            logger.info(f"[DECISOR] Decisão processada: {decisao_normalizada['decisao']} (confiança: {decisao_normalizada['confianca']:.2f})")
+            logger.info(f"[DECISOR] Previsões: Target {previsoes.get('target', 'N/A')}, Stop {previsoes.get('stop_loss', 'N/A')}")
+            return decisao_normalizada
             
         except Exception as e:
-            logger.error(f"Erro ao processar decisão da IA: {e}")
-            return self._decisao_fallback()
+            logger.error(f"[DECISOR] Erro ao processar decisão: {e}")
+            return None
     
-    def _validar_decisao_ia(self, decisao: Dict[str, Any]) -> bool:
-        """
-        Valida se a decisão da IA está no formato correto
-        """
-        campos_obrigatorios = ['decisao', 'confianca', 'razao', 'parametros']
-        
-        for campo in campos_obrigatorios:
-            if campo not in decisao:
-                return False
-        
-        # Validar valores
-        if decisao['decisao'] not in ['comprar', 'vender', 'aguardar']:
-            return False
-        
-        if not isinstance(decisao['confianca'], (int, float)) or not 0 <= decisao['confianca'] <= 1:
-            return False
-        
-        # Validar parâmetros
-        parametros = decisao.get('parametros', {})
-        if not isinstance(parametros, dict):
-            return False
-        
-        return True
-    
-    def _aplicar_filtros_seguranca(self, decisao: Dict[str, Any], 
-                                 dados_mercado: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Aplica filtros de segurança na decisão
-        """
-        decisao_filtrada = decisao.copy()
-        
-        # Ajustar confiança baseada em indicadores (opcional, mas não binarizar)
-        confianca_ajustada = self._ajustar_confianca(decisao['confianca'], dados_mercado)
-        decisao_filtrada['confianca'] = confianca_ajustada
-        
-        # Só bloquear operações com confiança muito baixa (<0.2)
-        if confianca_ajustada < 0.2:
-            logger.info(f"🔒 Decisão bloqueada: confiança ({confianca_ajustada:.2f}) < mínimo (0.2) | Forçando 'aguardar'.")
-            decisao_filtrada['decisao'] = 'aguardar'
-            decisao_filtrada['razao'] = f"Confiança muito baixa ({confianca_ajustada:.2f}) - aguardando sinal mais claro."
-        # Não binarizar confiança intermediária, deixar a IA decidir
-        # Ajustar parâmetros de trading
-        parametros = decisao_filtrada.get('parametros', {})
-        parametros['stop_loss'] = self.config['stop_loss_padrao']
-        parametros['take_profit'] = self.config['take_profit_padrao']
-        parametros['quantidade'] = 1  # Sempre 1 contrato por segurança
-        decisao_filtrada['parametros'] = parametros
-        return decisao_filtrada
-    
-    def _ajustar_confianca(self, confianca_original: float, 
-                          dados_mercado: Dict[str, Any]) -> float:
-        """
-        Ajusta confiança baseada em indicadores técnicos
-        """
-        confianca = confianca_original
-        
-        # Ajustar baseado no RSI (MENOS AGRESSIVO)
-        rsi = dados_mercado.get('rsi', 50.0)
-        if rsi < self.config['rsi_sobrevenda'] or rsi > self.config['rsi_sobrecompra']:
-            confianca *= 0.9  # Reduzir confiança em extremos (menos agressivo)
-        
-        # Ajustar baseado na volatilidade (MENOS AGRESSIVO)
-        volatilidade = dados_mercado.get('volatilidade', 0.0)
-        if volatilidade > self.config['volatilidade_maxima']:
-            confianca *= 0.8  # Reduzir confiança em alta volatilidade (menos agressivo)
-        
-        # Ajustar baseado no volume (API da B3 não retorna volume, então não penalizar)
-        volume = dados_mercado.get('volume', 0)
-        volume_medio = dados_mercado.get('volume_medio', 0)
-        # Só penalizar se tivermos dados de volume e estiver muito baixo
-        if volume > 0 and volume_medio > 0 and volume < volume_medio * 0.5:
-            confianca *= 0.9  # Reduzir confiança em baixo volume (menos agressivo)
-        
-        # Ajustar baseado na tendência (MENOS AGRESSIVO)
-        tendencia = dados_mercado.get('tendencia', 'lateral')
-        if tendencia == 'lateral':
-            confianca *= 0.95  # Reduzir confiança em mercado lateral (menos agressivo)
-        
-        return max(0.0, min(1.0, confianca))  # Manter entre 0 e 1
-    
-    def _verificar_condicoes_mercado(self, dados_mercado: Dict[str, Any]) -> bool:
-        """
-        Verifica se as condições de mercado são favoráveis
-        """
-        # Verificar horário de operação
-        agora = datetime.now()
-        hora_atual = agora.time()
-        
-        hora_inicio = time.fromisoformat(self.config['horario_inicio'])
-        hora_fim = time.fromisoformat(self.config['horario_fim'])
-        
-        # Para testes, permitir operação fora do horário de mercado
-        if not (hora_inicio <= hora_atual <= hora_fim):
-            logger.info("Fora do horário de operação (permitindo para testes)")
-            # return False  # Comentado para permitir testes
-        
-        # Verificar dia da semana
-        if agora.weekday() not in self.config['dias_semana']:
-            logger.info("Fora dos dias de operação (permitindo para testes)")
-            # return False  # Comentado para permitir testes
-        
-        # Verificar volume mínimo (API da B3 não retorna volume, então não bloquear)
-        volume = dados_mercado.get('volume', 0)
-        if volume > 0 and volume < self.config['volume_minimo']:
-            logger.info(f"Volume muito baixo: {volume}")
-            return False
-        
-        # Verificar volatilidade máxima
-        volatilidade = dados_mercado.get('volatilidade', 0.0)
-        if volatilidade > self.config['volatilidade_maxima']:
-            logger.info(f"Volatilidade muito alta: {volatilidade}")
-            return False
-        
-        return True
-    
-    def _verificar_limites_operacao(self, decisao: Dict[str, Any]) -> bool:
-        """
-        Verifica se não excedeu limites de operação
-        """
-        if decisao['decisao'] == 'aguardar':
-            return True
-        
-        # Contar operações do dia
-        hoje = datetime.now().date()
-        operacoes_hoje = sum(1 for d in self.decisoes_historico 
-                           if d['data'].date() == hoje and d['decisao'] != 'aguardar')
-        
-        if operacoes_hoje >= self.config['max_ordens_dia']:
-            logger.info(f"Limite de operações atingido: {operacoes_hoje}")
-            return False
-        
-        return True
-    
-    def _registrar_decisao(self, decisao: Dict[str, Any]):
-        """
-        Registra decisão no histórico
-        """
-        registro = {
-            'data': datetime.now(),
-            'decisao': decisao['decisao'],
-            'confianca': decisao['confianca'],
-            'razao': decisao['razao']
-        }
-        
-        self.decisoes_historico.append(registro)
-        
-        # Manter apenas últimas 100 decisões
-        if len(self.decisoes_historico) > 100:
-            self.decisoes_historico = self.decisoes_historico[-100:]
-    
-    def _decisao_fallback(self) -> Dict[str, Any]:
-        """
-        Retorna decisão de fallback
-        """
-        return {
-            "decisao": "aguardar",
-            "confianca": 0.0,
-            "razao": "Erro no processamento - usando fallback",
-            "parametros": {
-                "quantidade": 1,
-                "stop_loss": self.config['stop_loss_padrao'],
-                "take_profit": self.config['take_profit_padrao']
-            },
-            "indicadores_analisados": []
-        }
-    
-    def _decisao_aguardar(self) -> Dict[str, Any]:
-        """
-        Retorna decisão de aguardar
-        """
-        return {
-            "decisao": "aguardar",
-            "confianca": 0.0,
-            "razao": "Condições de mercado não favoráveis",
-            "parametros": {
-                "quantidade": 1,
-                "stop_loss": self.config['stop_loss_padrao'],
-                "take_profit": self.config['take_profit_padrao']
-            },
-            "indicadores_analisados": ["rsi", "macd", "bollinger", "media_movel", "volume", "tendencia"]
-        }
-    
-    def obter_estatisticas(self) -> Dict[str, Any]:
-        """
-        Retorna estatísticas das decisões
-        """
-        if not self.decisoes_historico:
-            return {
-                'total_decisoes': 0,
-                'decisoes_hoje': 0,
-                'taxa_compra': 0.0,
-                'taxa_venda': 0.0,
-                'taxa_aguardar': 0.0,
-                'confianca_media': 0.0
+    def _extrair_previsoes(self, decisao: Dict[str, Any]) -> Dict[str, Any]:
+        """Extrai previsões da resposta da IA"""
+        try:
+            previsoes = {
+                'target': None,
+                'stop_loss': None,
+                'cenarios': {
+                    'manter': None,
+                    'sair_lucro': None,
+                    'sair_perda': None
+                },
+                'justificativa': decisao.get('razao', 'Análise técnica')
             }
-        
-        total = len(self.decisoes_historico)
-        hoje = datetime.now().date()
-        
-        decisoes_hoje = [d for d in self.decisoes_historico if d['data'].date() == hoje]
-        compras = [d for d in self.decisoes_historico if d['decisao'] == 'comprar']
-        vendas = [d for d in self.decisoes_historico if d['decisao'] == 'vender']
-        aguardar = [d for d in self.decisoes_historico if d['decisao'] == 'aguardar']
-        
-        confianca_media = sum(d['confianca'] for d in self.decisoes_historico) / total
-        
-        return {
-            'total_decisoes': total,
-            'decisoes_hoje': len(decisoes_hoje),
-            'taxa_compra': len(compras) / total,
-            'taxa_venda': len(vendas) / total,
-            'taxa_aguardar': len(aguardar) / total,
-            'confianca_media': confianca_media
-        } 
+            
+            # Extrair target e stop loss diretamente do JSON da IA
+            previsoes['target'] = decisao.get('previsao_alvo') or decisao.get('target')
+            previsoes['stop_loss'] = decisao.get('stop_loss')
+            
+            # Extrair cenários se presentes
+            cenario_permanencia = decisao.get('cenario_permanencia')
+            cenario_saida = decisao.get('cenario_saida')
+            
+            if cenario_permanencia:
+                previsoes['cenarios']['manter'] = cenario_permanencia
+            if cenario_saida:
+                if 'lucro' in cenario_saida.lower() or 'alvo' in cenario_saida.lower():
+                    previsoes['cenarios']['sair_lucro'] = cenario_saida
+                elif 'perda' in cenario_saida.lower() or 'stop' in cenario_saida.lower():
+                    previsoes['cenarios']['sair_perda'] = cenario_saida
+            
+            # Fallback: tentar extrair da justificativa se não encontrou nos campos diretos
+            if not previsoes['target'] or not previsoes['stop_loss']:
+                razao = decisao.get('razao', '')
+                if 'target:' in razao.lower():
+                    try:
+                        import re
+                        target_match = re.search(r'target[:\s]+([\d.]+)', razao, re.IGNORECASE)
+                        if target_match:
+                            previsoes['target'] = float(target_match.group(1))
+                    except:
+                        pass
+                
+                if 'stop:' in razao.lower():
+                    try:
+                        import re
+                        stop_match = re.search(r'stop[:\s]+([\d.]+)', razao, re.IGNORECASE)
+                        if stop_match:
+                            previsoes['stop_loss'] = float(stop_match.group(1))
+                    except:
+                        pass
+            
+            return previsoes
+            
+        except Exception as e:
+            logger.error(f"[DECISOR] Erro ao extrair previsões: {e}")
+            return {
+                'target': None,
+                'stop_loss': None,
+                'cenarios': {'manter': None, 'sair_lucro': None, 'sair_perda': None},
+                'justificativa': 'Erro na extração de previsões'
+            }
+    
+    def decidir_ordem_aberta(self, ordem: Dict[str, Any], dados_mercado: Dict[str, Any]) -> Dict[str, Any]:
+        """Decide se deve manter, fechar ou ajustar uma ordem aberta"""
+        try:
+            # Extrair dados da ordem
+            preco_entrada = ordem.get('preco_entrada', 0)
+            preco_atual = dados_mercado.get('preco_atual', 0)
+            tipo_ordem = ordem.get('tipo_ordem', 'compra')
+            confianca_entrada = ordem.get('confianca_ia', 0.5)
+            
+            if preco_entrada == 0 or preco_atual == 0:
+                return {'acao': 'manter', 'razao': 'Dados insuficientes'}
+            
+            # Calcular PnL
+            if tipo_ordem == 'compra':
+                pnl_percentual = ((preco_atual - preco_entrada) / preco_entrada) * 100
+            else:  # venda
+                pnl_percentual = ((preco_entrada - preco_atual) / preco_entrada) * 100
+            
+            # Análise técnica para decisão
+            rsi = dados_mercado.get('rsi', 50.0)
+            tendencia = dados_mercado.get('tendencia', 'lateral')
+            volatilidade = dados_mercado.get('volatilidade', 0.02)
+            
+            # Lógica de decisão baseada em PnL e indicadores
+            if pnl_percentual >= 3.0:  # Take profit atingido
+                return {'acao': 'fechar', 'razao': f'Take profit atingido: {pnl_percentual:.2f}%'}
+            
+            elif pnl_percentual <= -2.0:  # Stop loss atingido
+                return {'acao': 'fechar', 'razao': f'Stop loss atingido: {pnl_percentual:.2f}%'}
+            
+            # Análise de reversão de tendência
+            elif tipo_ordem == 'compra' and rsi > 70 and tendencia == 'baixa':
+                return {'acao': 'fechar', 'razao': f'RSI sobrecomprado ({rsi:.1f}) e tendência baixa'}
+            
+            elif tipo_ordem == 'venda' and rsi < 30 and tendencia == 'alta':
+                return {'acao': 'fechar', 'razao': f'RSI sobrevendido ({rsi:.1f}) e tendência alta'}
+            
+            # Volatilidade alta - ser mais conservador
+            elif volatilidade > 0.03 and abs(pnl_percentual) > 1.0:
+                return {'acao': 'fechar', 'razao': f'Alta volatilidade ({volatilidade:.3f}) e PnL: {pnl_percentual:.2f}%'}
+            
+            # Manter ordem
+            else:
+                return {'acao': 'manter', 'razao': f'Condições favoráveis - PnL: {pnl_percentual:.2f}%'}
+                
+        except Exception as e:
+            logger.error(f"[DECISOR] Erro ao decidir ordem aberta: {e}")
+            return {'acao': 'manter', 'razao': f'Erro na análise: {e}'}
+    
+    def obter_metricas(self) -> Dict[str, Any]:
+        """Retorna métricas de performance"""
+        return self.metricas.obter_estatisticas()
+    
+    def exibir_metricas(self):
+        """Exibe métricas formatadas"""
+        self.metricas.exibir_estatisticas()
+    
+    def verificar_alertas(self) -> list:
+        """Verifica alertas de performance"""
+        return self.metricas.verificar_alertas()
+    
+    def registrar_resultado_operacao(self, symbol: str, resultado: str, lucro: float):
+        """Registra resultado de uma operação para análise de performance"""
+        try:
+            # Registrar no sistema de filtros
+            self.filtros.registrar_resultado(resultado, lucro)
+            
+            # Ajustar parâmetros dinamicamente
+            status_filtros = self.filtros.obter_status_filtros()
+            self.filtros.ajustar_parametros_dinamicos(status_filtros)
+            
+            logger.info(f"[DECISOR] Resultado registrado: {symbol} - {resultado} - ${lucro:.4f}")
+            
+        except Exception as e:
+            logger.error(f"[DECISOR] Erro ao registrar resultado: {e}")
+    
+    def obter_status_filtros(self) -> Dict[str, Any]:
+        """Retorna status dos filtros de qualidade"""
+        return self.filtros.obter_status_filtros()
+    
+    def limpar_cache(self):
+        """Limpa cache da IA"""
+        self.cliente_ia.limpar_cache()
+        logger.info("[DECISOR] Cache limpo")
+    
+    def resetar_metricas(self):
+        """Reseta métricas"""
+        self.metricas.resetar_metricas()
+        logger.info("[DECISOR] Métricas resetadas") 
+
+DecisorIA = Decisor 

@@ -35,7 +35,7 @@ from gestor_ordens_dinamico import GestorOrdensDinamico, TipoOrdem
 
 # Importar IA
 from ia.decisor import DecisorIA
-from ia.sistema_aprendizado_autonomo import SistemaAprendizadoAutonomo
+from ia.sistema_aprendizado_autonomo import sistema_autonomo, ResultadoTrade
 from ia.llama_cpp_client import LlamaCppClient
 
 class RoboCompleto:
@@ -138,11 +138,11 @@ class RoboCompleto:
             
             # 3. Sistema de Aprendizado Autônomo
             logger.info("🧠 Inicializando sistema de aprendizado...")
-            self.sistema_aprendizado = SistemaAprendizadoAutonomo()
+            self.sistema_aprendizado = sistema_autonomo
             
             # 4. Decisor IA
             logger.info("🤖 Inicializando decisor IA...")
-            self.decisor = DecisorIA(self.config, sistema_aprendizado=self.sistema_aprendizado, ia_client=self.ai_client)
+            self.decisor = DecisorIA("config.yaml", sistema_aprendizado=self.sistema_aprendizado, ia_client=self.ai_client)
             
             # 5. Gestor de Ordens Dinâmico
             logger.info("🎯 Inicializando gestor de ordens...")
@@ -206,7 +206,7 @@ class RoboCompleto:
             # Atualizar no banco
             try:
                 import sqlite3
-                conn = sqlite3.connect(self.gestor_ordens.db_path)
+                conn = sqlite3.connect("dados/trading.db")
                 cursor = conn.cursor()
                 cursor.execute("""
                     UPDATE ordens_dinamicas SET lucro_prejuizo = ?, pnl_percentual = ? WHERE order_id = ?
@@ -237,6 +237,18 @@ class RoboCompleto:
                 self.gestor_ordens._processar_ordem_ativa(ordem_completa, dados_mercado)
             except Exception as e:
                 logger.error(f"Erro ao processar ordem ativa {ordem_id}: {e}")
+    
+    def resetar_ordens(self):
+        """Reseta a tabela de ordens e sincroniza o estado em memória"""
+        import sqlite3
+        conn = sqlite3.connect("dados/trading.db")
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM ordens_dinamicas;")
+        conn.commit()
+        conn.close()
+        if self.gestor_ordens and hasattr(self.gestor_ordens, 'carregar_ordens_abertas'):
+            self.gestor_ordens.carregar_ordens_abertas()
+        logger.info("🔄 Tabela de ordens resetada e ordens em memória sincronizadas.")
     
     def verificar_conectividade(self) -> bool:
         """Verifica conectividade com todos os serviços"""
@@ -401,10 +413,8 @@ class RoboCompleto:
             dados_ia['risco_maximo_permitido'] = risco_maximo
             decisao_ia = self._analisar_com_ia(dados_ia)
             if decisao_ia:
-                if self.sistema_aprendizado and hasattr(self.sistema_aprendizado, "registrar_decisao_autonoma"):
-                    self.sistema_aprendizado.registrar_decisao_autonoma(
-                        dados_ia['symbol'], decisao_ia, dados_ia['dados_mercado']
-                    )
+                # Registrar decisão autônoma (usando novo sistema)
+                # O sistema autônomo agora registra resultados de trades, não decisões
                 if self.decisor and hasattr(self.decisor, "processar_decisao_ia"):
                     decisao_processada = self.decisor.processar_decisao_ia(decisao_ia, dados_ia['dados_mercado'])
                 else:
@@ -461,7 +471,7 @@ class RoboCompleto:
         if self.gestor_ordens and hasattr(self.gestor_ordens, 'db_path'):
             try:
                 import sqlite3
-                conn = sqlite3.connect(self.gestor_ordens.db_path)
+                conn = sqlite3.connect("dados/trading.db")
                 cursor = conn.cursor()
                 cursor.execute("""
                     UPDATE ordens_dinamicas SET lucro_prejuizo = ?, pnl_percentual = ? WHERE order_id = ?
@@ -523,12 +533,8 @@ class RoboCompleto:
                 if not decisao_ia:
                     continue
                 # 3. Registrar decisão no aprendizado autônomo
-                if self.sistema_aprendizado and hasattr(self.sistema_aprendizado, "registrar_decisao_autonoma"):
-                    self.sistema_aprendizado.registrar_decisao_autonoma(
-                        par.replace("/", ""), 
-                        decisao_ia, 
-                        dados_mercado['dados_mercado']
-                    )
+                # Registrar decisão autônoma (usando novo sistema)
+                # O sistema autônomo agora registra resultados de trades, não decisões
                 # 4. Processar decisão com aprendizado
                 if self.decisor and hasattr(self.decisor, "processar_decisao_ia"):
                     decisao_processada = self.decisor.processar_decisao_ia(decisao_ia, dados_mercado['dados_mercado'])
@@ -550,49 +556,58 @@ class RoboCompleto:
             logger.error(f"❌ Erro no ciclo completo: {e}")
     
     def _coletar_dados_par(self, par: str) -> Optional[Dict[str, Any]]:
-        """Coleta dados para um par específico"""
+        """Coleta dados para um par específico, incluindo features do livro de ordens"""
         try:
             if not self.executando:
                 logger.info(f"⏹️ Execução interrompida antes de coletar dados de {par}.")
                 return None
-            # Obter preço atual
-            if not self.coletor or not hasattr(self.coletor, "obter_preco_atual"):
-                logger.error(f"❌ Coletor não inicializado para obter preço de {par}")
-                return None
-            preco_atual = self.coletor.obter_preco_atual(par)
-            if not self.executando:
-                logger.info(f"⏹️ Execução interrompida após obter preço de {par}.")
-                return None
-            if not preco_atual:
-                return None
-            # Obter dados históricos
-            if not hasattr(self.coletor, "obter_dados_rest"):
+            
+            # Obter dados completos via obter_dados_rest
+            if not self.coletor or not hasattr(self.coletor, "obter_dados_rest"):
                 logger.error(f"❌ Coletor não implementa obter_dados_rest para {par}")
                 return None
-            dados_historicos = self.coletor.obter_dados_rest(par, "5", 100)
+            
+            dados_completos = self.coletor.obter_dados_rest(par)
             if not self.executando:
-                logger.info(f"⏹️ Execução interrompida após obter dados históricos de {par}.")
+                logger.info(f"⏹️ Execução interrompida após obter dados de {par}.")
                 return None
-            if dados_historicos is None or hasattr(dados_historicos, 'empty') and dados_historicos.empty:
+            
+            if not dados_completos:
                 return None
-            # Estruturar dados para IA
+            
+            # Coletar features do livro de ordens
+            from ia.coletor import obter_dados_order_book
+            dados_order_book = obter_dados_order_book(par)
+            
+            # Estruturar dados para IA usando os dados calculados + order book
             dados_ia = {
                 'symbol': par.replace("/", ""),
                 'par': par,
-                'preco_atual': preco_atual,
-                'dados_historicos': dados_historicos,
+                'preco_atual': dados_completos['preco_atual'],
+                'dados_historicos': dados_completos.get('dados_historicos', None),
                 'dados_mercado': {
                     'symbol': par.replace("/", ""),
-                    'preco_atual': preco_atual,
-                    'rsi': self._calcular_rsi(dados_historicos),
-                    'volatilidade': self._calcular_volatilidade(dados_historicos),
-                    'tendencia': self._determinar_tendencia(dados_historicos)
+                    'preco_atual': dados_completos['preco_atual'],
+                    'rsi': dados_completos['rsi'],
+                    'volatilidade': dados_completos['volatilidade'],
+                    'tendencia': dados_completos['tendencia'],
+                    'volume': dados_completos.get('volume', 0),
+                    'variacao': dados_completos.get('variacao', 0),
+                    # Features do livro de ordens
+                    'bid_ask_imbalance': dados_order_book['bid_ask_imbalance'],
+                    'max_bid_size': dados_order_book['max_bid_size'],
+                    'max_ask_size': dados_order_book['max_ask_size'],
+                    'liquidity_clusters': dados_order_book['liquidity_clusters']
                 }
             }
+            
             if not self.executando:
                 logger.info(f"⏹️ Execução interrompida após estruturar dados de {par}.")
                 return None
+            
+            logger.debug(f"📊 Dados coletados para {par}: RSI={dados_completos['rsi']:.1f}, Tend={dados_completos['tendencia']}, Vol={dados_completos['volatilidade']:.4f}, OB_Imb={dados_order_book['bid_ask_imbalance']:.2f}")
             return dados_ia
+            
         except Exception as e:
             logger.error(f"❌ Erro ao coletar dados para {par}: {e}")
             return None
@@ -684,8 +699,8 @@ class RoboCompleto:
             
             # Obter estatísticas de aprendizado
             stats_aprendizado = None
-            if self.sistema_aprendizado and hasattr(self.sistema_aprendizado, "obter_estatisticas_aprendizado"):
-                stats_aprendizado = self.sistema_aprendizado.obter_estatisticas_aprendizado()
+            if self.sistema_aprendizado and hasattr(self.sistema_aprendizado, "obter_estatisticas"):
+                stats_aprendizado = self.sistema_aprendizado.obter_estatisticas()
             
             prompt = f"""
 ANÁLISE DE TRADING CRYPTO - {symbol}
@@ -695,6 +710,12 @@ DADOS ATUAIS:
 - RSI (14): {rsi:.2f}
 - Volatilidade: {volatilidade:.4f}
 - Tendência: {tendencia}
+
+LIVRO DE ORDENS (ORDER BOOK):
+- Desequilíbrio Bid/Ask: {dados_ia['dados_mercado'].get('bid_ask_imbalance', 0):.2f}
+- Maior ordem de compra: {dados_ia['dados_mercado'].get('max_bid_size', 0):.2f}
+- Maior ordem de venda: {dados_ia['dados_mercado'].get('max_ask_size', 0):.2f}
+- Clusters de liquidez: {dados_ia['dados_mercado'].get('liquidity_clusters', 0)}
 
 HISTÓRICO RECENTE (últimos 5 períodos):
 """
@@ -720,14 +741,17 @@ Considere:
 1. Tendência atual do mercado
 2. Nível de RSI (sobrecomprado/sobrevendido)
 3. Volatilidade atual
-4. Histórico de aprendizado da IA
-5. Seu nível de confiança na decisão
+4. Desequilíbrio do livro de ordens (bid/ask imbalance)
+5. Tamanho das maiores ordens (pressão compradora/vendedora)
+6. Clusters de liquidez (concentração de ordens)
+7. Histórico de aprendizado da IA
+8. Seu nível de confiança na decisão
 
 RESPONDA APENAS COM JSON:
 {{
     "decisao": "comprar|vender|aguardar",
     "confianca": 0.0-1.0,
-    "razao": "explicação da decisão"
+    "razao": "explicação da decisão incluindo análise do order book"
 }}
 """
             
@@ -738,19 +762,26 @@ RESPONDA APENAS COM JSON:
             return ""
     
     def _executar_decisao(self, par: str, decisao: Dict[str, Any], dados_mercado: Dict[str, Any]):
-        """Executa decisão da IA"""
+        """Executa decisão da IA com filtros de qualidade"""
         try:
             decisao_tipo = decisao.get('decisao', '').lower()
             confianca = decisao.get('confianca')
             if confianca is None:
                 confianca = 0.0
             symbol = par.replace("/", "")
-            # Remover este bloco para permitir múltiplas ordens por ativo:
-            # if self.gestor_ordens and hasattr(self.gestor_ordens, 'ordens_ativas'):
-            #     for ordem in self.gestor_ordens.ordens_ativas.values():
-            #         if ordem['symbol'] == symbol:
-            #             logger.info(f"⏳ Já existe ordem aberta para {symbol}, aguardando fechamento.")
-            #             return
+            
+            # APLICAR FILTROS DE QUALIDADE
+            if decisao_tipo in ['comprar', 'vender']:
+                # Verificar filtros de qualidade
+                if self.decisor and hasattr(self.decisor, 'filtros') and self.decisor.filtros:
+                    aprovado, motivo = self.decisor.filtros.verificar_qualidade_entrada(decisao, dados_mercado)
+                    
+                    if not aprovado:
+                        logger.warning(f"🚫 Decisão rejeitada pelos filtros: {motivo}")
+                        return
+                    else:
+                        logger.info(f"✅ Decisão aprovada pelos filtros: {motivo}")
+            
             logger.info(f"🎯 Executando decisão: {decisao_tipo} {par} (confiança: {confianca:.3f})")
             if decisao_tipo == 'comprar':
                 self._abrir_ordem_dinamica(par, decisao, dados_mercado, 'compra')
@@ -762,14 +793,19 @@ RESPONDA APENAS COM JSON:
             logger.error(f"❌ Erro ao executar decisão: {e}")
 
     def _abrir_ordem_dinamica(self, par: str, decisao: Dict[str, Any], dados_mercado: Dict[str, Any], tipo_ordem: str):
-        """Abre ordem via gestor dinâmico, sempre com stop/take dinâmicos"""
+        """Abre ordem via gestor dinâmico, sempre com stop/take dinâmicos e previsões da IA"""
         try:
             symbol = par.replace("/", "")
             confianca = decisao.get('confianca')
             if confianca is None:
                 confianca = 0.0
             preco_entrada = dados_mercado['dados_mercado']['preco_atual']
-            stop_loss = decisao['parametros'].get('stop_loss', preco_entrada)
+            
+            # Usar previsões da IA se disponíveis
+            previsoes_ia = decisao.get('previsoes', {})
+            stop_loss = previsoes_ia.get('stop_loss') if previsoes_ia.get('stop_loss') else decisao['parametros'].get('stop_loss', preco_entrada)
+            take_profit = previsoes_ia.get('target') if previsoes_ia.get('target') else decisao['parametros'].get('take_profit', preco_entrada)
+            
             quantidade = decisao['parametros'].get('quantidade', 1.0 / preco_entrada)
             risco_maximo = self.config.get('risco_maximo_permitido', 3.0)
             risco_real = abs(preco_entrada - stop_loss) * quantidade
@@ -780,16 +816,38 @@ RESPONDA APENAS COM JSON:
             if risco_real > risco_maximo:
                 logger.error(f"Ordem NÃO aberta: risco real ({risco_real:.2f}) > risco máximo permitido ({risco_maximo:.2f})")
                 return
-            # Sempre operar com quantidade calculada
+            
             # Gerar order_id único
             order_id = f"ORD_{int(time.time())}_{symbol}"
+            
+            # Garantir que stop_loss e take_profit nunca sejam None
+            if stop_loss is None:
+                stop_loss = preco_entrada
+            if take_profit is None:
+                take_profit = preco_entrada
+
+            # Abrir ordem no gestor dinâmico (que fará a inserção no banco)
             if self.gestor_ordens and hasattr(self.gestor_ordens, 'abrir_ordem_dinamica'):
                 tipo_enum = TipoOrdem.COMPRA if tipo_ordem == 'compra' else TipoOrdem.VENDA
-                self.gestor_ordens.abrir_ordem_dinamica(
-                    order_id, symbol, tipo_enum, preco_entrada, quantidade, dados_mercado['dados_mercado'], confianca
+                
+                # Adicionar previsões à ordem para o gestor
+                dados_completos = dados_mercado['dados_mercado'].copy()
+                dados_completos['previsoes_ia'] = previsoes_ia
+                
+                resultado = self.gestor_ordens.abrir_ordem_dinamica(
+                    order_id, symbol, tipo_enum, preco_entrada, quantidade, dados_completos, confianca
                 )
+                
+                if resultado:
+                    logger.info(f"🎯 Ordem {order_id} aberta com previsões IA:")
+                    logger.info(f"   Target: {previsoes_ia.get('target', 'N/A')}")
+                    logger.info(f"   Stop: {stop_loss}")
+                    logger.info(f"   Cenários: {previsoes_ia.get('cenarios', {})}")
+                else:
+                    logger.error(f"❌ Falha ao abrir ordem dinâmica: {order_id}")
             else:
                 logger.error("❌ Gestor de ordens dinâmico não disponível para abrir ordem.")
+                
         except Exception as e:
             logger.error(f"❌ Erro ao abrir ordem dinâmica: {e}")
     
@@ -839,8 +897,8 @@ RESPONDA APENAS COM JSON:
             
             # Obter estatísticas de aprendizado
             stats_aprendizado = None
-            if self.sistema_aprendizado and hasattr(self.sistema_aprendizado, "obter_estatisticas_aprendizado"):
-                stats_aprendizado = self.sistema_aprendizado.obter_estatisticas_aprendizado()
+            if self.sistema_aprendizado and hasattr(self.sistema_aprendizado, "obter_estatisticas"):
+                stats_aprendizado = self.sistema_aprendizado.obter_estatisticas()
             
             # Obter estatísticas de gestão
             stats_gestao = None
@@ -873,6 +931,14 @@ RESPONDA APENAS COM JSON:
                 logger.info(f"   Lucro total: ${stats_gestao.get('lucro_total', 0):.2f}")
                 logger.info(f"   Ajustes realizados: {stats_gestao.get('total_ajustes', 0)}")
             
+            if self.config['simulacao']['ativo'] and isinstance(self.executor, ExecutorSimulado):
+                stats_sim = self.executor.obter_estatisticas_ordens_simuladas()
+                logger.info(f"📈 ORDENS SIMULADAS:")
+                logger.info(f"   Total fechadas: {stats_sim['total']}")
+                logger.info(f"   Wins: {stats_sim['wins']} | Losses: {stats_sim['losses']} | Neutras: {stats_sim['neutras']}")
+                logger.info(f"   Win Rate: {stats_sim['win_rate']:.1f}%")
+                logger.info(f"   PnL Total: ${stats_sim['pnl_total']:.4f}")
+            
             logger.info("=" * 50)
             
         except Exception as e:
@@ -889,8 +955,8 @@ RESPONDA APENAS COM JSON:
             
             # Parar coletor
             if self.coletor:
-                if hasattr(self.coletor, "parar_websocket"):
-                    self.coletor.parar_websocket()
+                # Removido: método parar_websocket não existe em ColetorBybit
+                pass
             
             # Parar gestor de ordens
             if self.gestor_ordens:
@@ -922,10 +988,10 @@ RESPONDA APENAS COM JSON:
                 variacao = ((self.estatisticas['capital_atual'] - self.estatisticas['capital_inicial']) / self.estatisticas['capital_inicial']) * 100
                 logger.info(f"💰 Resultado: {variacao:+.2f}%")
             
-            # Exportar aprendizado
-            if self.sistema_aprendizado and hasattr(self.sistema_aprendizado, "exportar_aprendizado"):
-                self.sistema_aprendizado.exportar_aprendizado()
-                logger.info(f"📁 Aprendizado exportado com sucesso!")
+            # Salvar estado da IA autônoma
+            if self.sistema_aprendizado and hasattr(self.sistema_aprendizado, "salvar_estado"):
+                self.sistema_aprendizado.salvar_estado()
+                logger.info(f"📁 Estado da IA autônoma salvo com sucesso!")
             
             logger.info("=" * 50)
             
@@ -986,6 +1052,41 @@ def main():
             format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
         )
         
+        # Garantir que a tabela ordens_dinamicas existe (schema unificado)
+        import sqlite3
+        conn = sqlite3.connect("dados/trading.db")
+        c = conn.cursor()
+        c.execute('''
+CREATE TABLE IF NOT EXISTS ordens_dinamicas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id TEXT UNIQUE NOT NULL,
+    symbol TEXT NOT NULL,
+    tipo_ordem TEXT NOT NULL,
+    preco_entrada REAL NOT NULL,
+    quantidade REAL NOT NULL,
+    stop_loss_inicial REAL,
+    take_profit_inicial REAL,
+    stop_loss_atual REAL,
+    take_profit_atual REAL,
+    status TEXT NOT NULL,
+    timestamp_abertura DATETIME DEFAULT CURRENT_TIMESTAMP,
+    timestamp_fechamento DATETIME,
+    preco_saida REAL,
+    lucro_prejuizo REAL,
+    tempo_aberta_segundos INTEGER,
+    ajustes_stop_loss INTEGER DEFAULT 0,
+    ajustes_take_profit INTEGER DEFAULT 0,
+    saida_inteligente_utilizada BOOLEAN DEFAULT FALSE,
+    razao_saida TEXT,
+    dados_mercado_saida TEXT,
+    previsoes_ia TEXT,
+    cenarios_ia TEXT,
+    justificativa_ia TEXT
+)
+''')
+        conn.commit()
+        conn.close()
+
         # Criar e iniciar robô
         robo = RoboCompleto()
         robo.iniciar()
